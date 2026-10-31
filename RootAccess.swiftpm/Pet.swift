@@ -1,9 +1,9 @@
 import SwiftUI
 
-struct PetScreen: View {
+@MainActor struct PetScreen: View {
     @EnvironmentObject var store: GameStore
     var body: some View {
-        let lv = store.level, st = PET_STAGES[store.stageIndex], next = PET_STAGES.first { $0.lvl > lv }
+        let lv = store.level, st = CUR.petStages[store.stageIndex], next = CUR.petStages.first { $0.lvl > lv }
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 Panel {
@@ -18,7 +18,7 @@ struct PetScreen: View {
                     HStack { Text("Bond").frame(width: 70, alignment: .leading); ProgressView(value: Double(store.s.pet.bond), total: 100) }
                 }
                 Panel {
-                    Text("FORM \(store.stageIndex + 1)/\(PET_STAGES.count)").font(.caption).foregroundStyle(Color.mut)
+                    Text("FORM \(store.stageIndex + 1)/\(CUR.petStages.count)").font(.caption).foregroundStyle(Color.mut)
                     Text(st.name).font(.title.bold()); Text(st.desc)
                     Text(next.map { "Next evolution: \($0.name) at level \($0.lvl). Your pet only evolves as far as your skills do." } ?? "Final form reached. It knows what you know.")
                         .font(.footnote).foregroundStyle(Color.mut)
@@ -31,7 +31,7 @@ struct PetScreen: View {
     func picker(_ key: String, _ title: String, _ path: WritableKeyPath<PetState, String>) -> some View {
         VStack(alignment: .leading) {
             Text(title).font(.headline)
-            ScrollView(.horizontal, showsIndicators: false) { HStack { ForEach(PET_PARTS[key]!, id: \.id) { p in
+            ScrollView(.horizontal, showsIndicators: false) { HStack { ForEach(CUR.petParts[key] ?? [], id: \.id) { p in
                 let locked = store.level < p.lvl, on = store.s.pet[keyPath: path] == p.id
                 Button { store.s.pet[keyPath: path] = p.id } label: {
                     Text(locked ? "\(p.label) · LVL \(p.lvl)" : p.label).font(.caption).padding(8)
@@ -45,7 +45,7 @@ struct PetScreen: View {
 struct PetCanvas: View {
     let pet: PetState; let stage: Int
     var body: some View {
-        let col = Color(hex: PET_PARTS["color"]!.first { $0.id == pet.color }?.hex ?? "#3dff7a")
+        let col = Color(hex: CUR.petParts["color"]?.first { $0.id == pet.color }?.hex ?? "#3dff7a")
         TimelineView(.animation) { tl in
             let t = tl.date.timeIntervalSinceReferenceDate
             Canvas { ctx, size in
@@ -60,7 +60,7 @@ struct PetCanvas: View {
                 var b = ctx
                 b.translateBy(x: pet.aura == "glitch" && Int(t * 3) % 7 == 0 ? 3 : 0, y: sin(t * 2) * 5)
                 b.addFilter(.shadow(color: col, radius: 8))
-                let r = 34.0 + Double(stage) * 8, cy = 112.0, line = StrokeStyle(lineWidth: 3)
+                let r = 34.0 + Double(min(stage, 4)) * 8, cy = 112.0, line = StrokeStyle(lineWidth: 3)
                 switch stage {
                 case 0:
                     b.stroke(Path(roundedRect: CGRect(x: 100 - r, y: cy - r, width: r * 2, height: r * 2), cornerRadius: 6), with: .color(col), style: line)
@@ -106,6 +106,6 @@ struct PetCanvas: View {
                 }
             }
         }
-        .accessibilityLabel("\(pet.name), \(PET_STAGES[stage].name)")
+        .accessibilityLabel("\(pet.name), \(CUR.petStages[stage].name)")
     }
 }

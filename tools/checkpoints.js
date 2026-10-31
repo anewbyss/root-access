@@ -92,7 +92,7 @@ for (const m of missions) {
       const stdout = m.id === "sw11" ? r.out + r.err : r.out;
       // dotnet run compiles and runs in one step; surface compiler errors as "Compiles".
       if (m.lang === "csharp" && r.code !== 0 && /error CS\d+/.test(r.out + r.err)) { rep = RA.buildReport(m, meta, { status: "Compilation Error", compile: r.out + r.err }); }
-      else rep = RA.buildReport(m, meta, { status: r.code === 0 || (m.id === "sw11" && /Test run with/.test(stdout)) ? "Accepted" : r.code === 124 ? "Time Limit Exceeded" : "Runtime Error (exit " + r.code + ")", stdout, stderr: r.err, compile: c.err });
+      else rep = RA.buildReport(m, meta, { status: r.code === 0 || (m.id === "sw11" && /Test run with/.test(stdout)) ? "Accepted" : r.code === 124 ? "Time Limit Exceeded" : "Runtime Error (exit " + r.code + ")", stdout, stderr: r.err, compile: c.err, user });
     }
   }
   const ok = RA.allPassed(rep);

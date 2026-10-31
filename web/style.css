@@ -55,3 +55,54 @@ textarea.backup{width:100%;min-height:120px;background:#010403;color:var(--txt);
 @keyframes bob{50%{transform:translateY(-6px)}}.bob{animation:bob 3s ease-in-out infinite}
 @keyframes spin{to{transform:rotate(360deg)}}.spin{transform-origin:100px 100px;animation:spin 12s linear infinite}
 @keyframes gl{0%,92%,100%{transform:none}94%{transform:translate(3px,-2px)}97%{transform:translate(-3px,1px)}}.glitch{animation:gl 2.5s infinite}
+/* v2 */
+a{color:var(--acc)}a:hover{filter:brightness(1.2)}
+.tiny{font-size:11px;letter-spacing:.06em}
+.between{justify-content:space-between}
+.foot{margin:28px 0 8px;font-size:12px;text-align:center}
+.mcard h3{margin:4px 0}
+.cstack{display:flex;flex-direction:column;gap:6px;align-items:flex-end}
+.chip.ok{color:var(--g);border-color:var(--gd)}.chip.ci{color:#ffd84d;border-color:#6b5a1a}
+.mini{flex:1;height:3px;margin:0 10px;align-self:center;background:#0b2016}.mini i{display:block;height:100%;background:var(--acc)}
+.langs button{gap:6px;align-items:center}
+.lhead{display:flex;gap:20px;justify-content:space-between;align-items:center;margin-bottom:14px}
+.lhead .row{margin-top:8px}
+.fluency{position:relative;width:120px;min-width:120px;text-align:center}
+.fluency svg{width:120px;height:120px;transform:rotate(-90deg)}
+.fluency .trk{fill:none;stroke:#0b2016;stroke-width:8}.fluency .val{fill:none;stroke:var(--acc);stroke-width:8;transition:stroke-dasharray .6s}
+.fluency div{position:absolute;top:38px;left:0;right:0;font:700 26px var(--disp);color:#eafff0}.fluency div b{color:var(--acc)}
+.fluency span{display:block;margin-top:-6px;font-size:11px}
+@media(max-width:600px){.lhead{flex-direction:column-reverse;align-items:flex-start}}
+.cert{border-color:var(--acc);margin-bottom:14px;box-shadow:0 0 30px -12px var(--acc)}
+.mhead{margin:12px 0}
+.primm{display:flex;flex-wrap:wrap;gap:4px;list-style:none;padding:0;margin:0 0 8px}
+.primm button{font-size:12px;padding:5px 10px}.primm button.on{background:var(--acc);color:#021;border-color:var(--acc)}.primm button.past{color:var(--acc);border-color:var(--gd)}
+.stagehint{font-size:13px;margin:0 0 14px;color:var(--mut)}
+.explain{margin:14px 0;padding:12px;border-left:2px solid var(--acc);background:#020b07}
+.explain textarea,.field{width:100%;background:#010403;color:var(--txt);border:1px solid var(--line);font:13px var(--mono);padding:8px;margin-top:6px;border-radius:2px}
+.explain textarea:focus,.field:focus{outline:none;border-color:var(--acc)}
+.worked{margin-top:14px;border:1px dashed var(--line);padding:10px}.worked summary{cursor:pointer;color:var(--acc)}.worked[data-locked] summary{color:var(--mut);cursor:default}
+.cplist{border:1px solid var(--line);padding:10px 12px;margin-bottom:10px;background:#020b07}
+.cplist ul{list-style:none;margin:6px 0 0;padding:0;font-size:13px}.cplist li{padding:2px 0}
+.cplist p{margin:0}
+.tabs{margin-bottom:14px}.tabs button.on,.langtabs button.on{border-color:var(--acc);color:var(--acc)}
+.langtabs{margin-bottom:14px}.langtabs button{font-size:12px;padding:6px 10px}
+.dossier{display:grid;gap:14px}
+.lead{font:500 20px var(--disp);color:#eafff0}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin:14px 0}
+.stats div{border:1px solid var(--line);padding:12px;display:flex;flex-direction:column;gap:2px}
+.stats b{font:700 24px var(--disp);color:var(--acc)}.stats span{color:var(--txt);font-size:12px}.stats a{color:var(--mut)}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:14px}@media(max-width:860px){.two{grid-template-columns:1fr}}
+.two ul,.panel ul{padding-left:18px;margin:6px 0}.two li{margin:4px 0}
+.path{columns:2;font-size:13px}@media(max-width:600px){.path{columns:1}}
+.stages li{margin:6px 0}
+.tablewrap{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:13px;margin-top:10px}th,td{text-align:left;padding:8px;border-bottom:1px solid var(--line)}th{color:var(--acc);font-weight:600}
+.glyphs{display:flex;flex-wrap:wrap;gap:6px}
+.stat{margin-top:10px}.stat span{width:60px}
+textarea.backup{margin-top:10px}
+.filebtn{cursor:pointer;padding:8px 14px}
+.snap{padding:10px}
+.lbl{display:block;margin:10px 0;font-size:12px;color:var(--mut)}
+select.field{appearance:auto}
+.lesson pre{font-size:12.5px}
+@media(max-width:600px){#app{padding:10px}.panel{padding:14px}.hud{flex-wrap:wrap}.editor{min-height:200px}}

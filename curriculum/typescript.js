@@ -1,4 +1,4 @@
-RA.lang("typescript", { name: "TypeScript", tag: "TS", runtime: "ts", why: "JavaScript with a type system. The default for serious web and Node teams. Transpiled and run live here." });
+RA.lang("typescript", { name: "TypeScript", tag: "TS", runtime: "ts", why: "JavaScript with a type system. The default for serious web and Node teams. Checkpoints type-check and run it." });
 RA.add("typescript", "ts", [
 { title: "Typed Signal", concept: "type annotations, inference, primitives",
   lesson: `<p>TypeScript checks your code before it runs, then compiles to plain JavaScript.</p><pre>let handle: string = "neo";

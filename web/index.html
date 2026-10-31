@@ -3,8 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ROOT//ACCESS — learn to code by jacking in</title>
+<title>ROOT//ACCESS: learn to code by jacking in</title>
+<meta name="description" content="A narrative hacking game that teaches 12 programming languages to fluency, with checkpoints graded by real compilers.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;800&family=Chakra+Petch:wght@500;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
 </head>
@@ -12,19 +14,39 @@
 <canvas id="rain" aria-hidden="true"></canvas>
 <div id="app">
   <header class="top">
-    <div class="brand">ROOT<span>//</span>ACCESS</div>
-    <nav id="nav">
+    <div class="brand" aria-label="ROOT//ACCESS">ROOT<span>//</span>ACCESS</div>
+    <nav id="nav" aria-label="Main">
       <button data-view="missions">Missions</button>
-      <button data-view="pet">Code Pet</button>
       <button data-view="intel">Intel</button>
+      <button data-view="pet">Code Pet</button>
       <button data-view="backup">Backup</button>
+      <button data-view="settings">Engines</button>
     </nav>
     <div class="hud" id="hud"></div>
   </header>
   <main id="view"></main>
+  <footer class="foot mut">Checkpoints run on <a href="https://ce.judge0.com/" target="_blank" rel="noopener">Judge0</a> in your browser and on current toolchains in GitHub Actions. Progress lives in this session: back it up.</footer>
 </div>
-<div id="toast" role="status"></div>
-<script src="data.js"></script>
+<div id="toast" role="status" aria-live="polite"></div>
+<script src="curriculum/_core.js"></script>
+<script src="curriculum/_world.js"></script>
+<script src="curriculum/_dossiers.js"></script>
+<script src="curriculum/_engine.js"></script>
+<script src="curriculum/python.js"></script>
+<script src="curriculum/javascript.js"></script>
+<script src="curriculum/typescript.js"></script>
+<script src="curriculum/sql.js"></script>
+<script src="curriculum/bash.js"></script>
+<script src="curriculum/go.js"></script>
+<script src="curriculum/rust.js"></script>
+<script src="curriculum/swift.js"></script>
+<script src="curriculum/kotlin.js"></script>
+<script src="curriculum/java.js"></script>
+<script src="curriculum/csharp.js"></script>
+<script src="curriculum/cpp.js"></script>
+<script src="curriculum/checkpoints.js"></script>
+<script src="curriculum/solutions.js"></script>
+<script src="zip.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

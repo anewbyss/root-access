@@ -242,7 +242,7 @@ ra_eq() { if [ "$2" = "$3" ]; then echo "::cp::PASS::$1"; else echo "::cp::FAIL:
       const tc = (code.match(/class\s+(\w+Test)\b/) || [])[1] || "RaNoTest";
       let [ui, uc] = hoist(code, /^\s*import\s+[\w.*]+\s*$/gm);
       let [hi, hc] = hoist(h, /^\s*import\s+[\w.*]+\s*$/gm);
-      const vm = (code.match(/class\s+(\w+)[^{]*:\s*ViewModel\s*\(/) || [])[1] || "RaNoViewModel";
+      const vm = (code.match(/class\s+(\w+)[^{\n]*:\s*ViewModel\s*\(/) || [])[1] || "RaNoViewModel";
       const screen = (code.match(/@Composable\s+fun\s+(\w+)/) || [])[1] || "RaNoScreen";
       const sealed = [...code.matchAll(/^\s*sealed\s+(?:class|interface)\s+(\w+)/gm)].map(x => JSON.stringify(x[1]));
       return uniq(hi.concat(ui)).join("\n") + "\n" + shim + put(hc, uc).replace(/__TEST_CLASS__/g, tc)
@@ -374,14 +374,15 @@ if ran:
   const b64e = (s) => (typeof btoa === "function" ? btoa(unescape(encodeURIComponent(s))) : Buffer.from(s, "utf8").toString("base64"));
   const b64d = (s) => (!s ? "" : typeof atob === "function" ? decodeURIComponent(escape(atob(s))) : Buffer.from(s, "base64").toString("utf8"));
   RA.judge0Hosts = { ce: "https://ce.judge0.com", extra: "https://extra-ce.judge0.com" };
-  RA.runJudge0 = async (m, user, cfg) => {
+  // Split into request/finish so other hosts (the Swift app via JavaScriptCore + URLSession) reuse the exact same logic.
+  RA.judge0Request = (m, user, cfg) => {
     cfg = cfg || {};
     const eng = RA.ENGINES[m.lang];
     const harness = m.lang in { python: 1, javascript: 1, typescript: 1, sql: 1 } ? "gen" : RA.HARNESS[m.id];
     const meta = RA.harnessMeta(harness === "gen" ? "" : harness);
-    if (meta.ciOnly) return { engine: eng.label, ciOnly: meta.ciOnly, results: [] };
+    if (meta.ciOnly) return { engine: eng.label, ciOnly: meta.ciOnly };
     const src = RA.compose(m, user, "judge0");
-    if (!src) return { engine: eng.label, error: "No harness for this mission", results: [] };
+    if (!src) return { engine: eng.label, error: "No harness for this mission" };
     const base = (cfg.hosts && cfg.hosts[eng.host]) || RA.judge0Hosts[eng.host];
     const headers = { "Content-Type": "application/json" };
     if (cfg.token) headers["X-Auth-Token"] = cfg.token;
@@ -389,18 +390,25 @@ if ran:
     const body = { language_id: eng.id, source_code: b64e(src), cpu_time_limit: 10, wall_time_limit: 20, memory_limit: 512000 };
     if (eng.opts || meta.opts) body.compiler_options = [eng.opts, meta.opts].filter(Boolean).join(" ");
     if (meta.args) body.command_line_arguments = meta.args;
-    const res = await fetch(base + "/submissions?base64_encoded=true&wait=true", { method: "POST", headers, body: JSON.stringify(body) });
-    if (!res.ok) throw new Error("Judge0 HTTP " + res.status);
-    const r = await res.json();
+    return { engine: eng.label, meta, url: base + "/submissions?base64_encoded=true&wait=true", headers, body: JSON.stringify(body) };
+  };
+  RA.judge0Finish = (m, req, r, user) => {
     const stdout = b64d(r.stdout), stderr = b64d(r.stderr), compile = b64d(r.compile_output);
     const status = r.status ? r.status.description : "Unknown";
-    return Object.assign(RA.buildReport(m, meta, { status, stdout, stderr, compile }), { engine: eng.label, time: r.time, memory: r.memory });
+    return Object.assign(RA.buildReport(m, req.meta, { status, stdout, stderr, compile, user }), { engine: req.engine, time: r.time, memory: r.memory });
+  };
+  RA.runJudge0 = async (m, user, cfg) => {
+    const req = RA.judge0Request(m, user, cfg);
+    if (req.ciOnly || req.error) return Object.assign({ results: [] }, req);
+    const res = await fetch(req.url, { method: "POST", headers: req.headers, body: req.body });
+    if (!res.ok) throw new Error("Judge0 HTTP " + res.status);
+    return RA.judge0Finish(m, req, await res.json(), user);
   };
   // Shared by Judge0 and the GitHub Actions runner. status: "Accepted" | "Compilation Error" | anything else = runtime failure.
   RA.buildReport = (m, meta, run) => {
     const { status, stdout = "", stderr = "", compile = "" } = run;
     const results = RA.parseCheckpoints(stdout);
-    RA.testSuiteSummary(stdout, results);
+    RA.testSuiteSummary(stdout, results, run.user || "");
     if (status === "Compilation Error") results.unshift({ status: "FAIL", label: "Compiles", detail: compile.split("\n").filter((l) => /error/i.test(l)).slice(0, 4).join(" / ") || compile.slice(0, 400) });
     else if (["python", "javascript", "sql", "bash"].indexOf(m.lang) < 0) results.unshift({ status: "PASS", label: "Compiles", detail: "" });
     if (status !== "Accepted" && status !== "Compilation Error") results.push({ status: "FAIL", label: "Runs to completion", detail: status + (stderr ? ": " + stderr.slice(0, 300) : "") });
@@ -408,13 +416,13 @@ if ran:
     return { status, stdout, stderr, compile, results };
   };
   // Native test-runner summaries (cargo/rustc --test) become a checkpoint too.
-  RA.testSuiteSummary = (stdout, results) => {
+  RA.testSuiteSummary = (stdout, results, user) => {
     const t = [...(stdout || "").matchAll(/test result: (ok|FAILED)\. (\d+) passed; (\d+) failed/g)];
     const sw = (stdout || "").match(/Test run with (\d+) tests? (passed|failed)/);
     if (sw) {
       const n = +sw[1];
       results.push({ status: sw[2] === "passed" && n >= 2 ? "PASS" : "FAIL", label: "Your @Test suite", detail: `${n} tests ${sw[2]} (need at least 2, all passing)` });
-      results.push({ status: /with \d+ test cases/.test(stdout) ? "PASS" : "FAIL", label: "Includes a parameterized test", detail: "add @Test(arguments: [...]) to one test" });
+      results.push({ status: sw[2] === "passed" && (/with \d+ (test cases|arguments)/.test(stdout) || /@Test\s*\([^)]*\barguments\s*:/.test(user || "")) ? "PASS" : "FAIL", label: "Includes a parameterized test", detail: "add @Test(arguments: [...]) to one test" });
     }
     if (!t.length) return;
     const passed = t.reduce((a, x) => a + +x[2], 0), failed = t.reduce((a, x) => a + +x[3], 0);

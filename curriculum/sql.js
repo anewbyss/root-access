@@ -1,4 +1,4 @@
-RA.lang("sql", { name: "SQL", tag: "SQL", runtime: "sql", why: "How every company talks to its data. Runs live here against a real SQLite database." });
+RA.lang("sql", { name: "SQL", tag: "SQL", runtime: "sql", why: "How every company talks to its data. Checkpoints run it against a real SQLite database." });
 const SCHEMA = `<p class="mut">Training DB: <code>agents(id, name, faction, rank)</code>, <code>events(id, agent_id, ip, status, ts)</code>, <code>nodes(id, district, online)</code>.</p>`;
 RA.add("sql", "sql", [
 { title: "Query the Archive", concept: "SELECT, columns, aliases",

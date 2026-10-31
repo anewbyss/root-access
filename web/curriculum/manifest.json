@@ -1,0 +1,23 @@
+{
+  "order": [
+    "_core",
+    "_world",
+    "_dossiers",
+    "_engine",
+    "python",
+    "javascript",
+    "typescript",
+    "sql",
+    "bash",
+    "go",
+    "rust",
+    "swift",
+    "kotlin",
+    "java",
+    "csharp",
+    "cpp",
+    "checkpoints",
+    "solutions"
+  ],
+  "built": "2026-10-31T22:06:20.531Z"
+}

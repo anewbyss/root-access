@@ -1,4 +1,4 @@
-RA.lang("javascript", { name: "JavaScript", tag: "JS", runtime: "js", why: "Runs in every browser on Earth and on servers via Node. Executes live here." });
+RA.lang("javascript", { name: "JavaScript", tag: "JS", runtime: "js", why: "Runs in every browser on Earth and on servers via Node. Checkpoints run on Node." });
 RA.add("javascript", "js", [
 { title: "Ghost Signal", concept: "let/const, types, template literals, functions",
   lesson: `<p>Use <code>const</code> by default and <code>let</code> when a value must change. Never use <code>var</code>. The types are <code>string</code>, <code>number</code>, <code>boolean</code>, <code>null</code>, <code>undefined</code>, <code>object</code> and <code>bigint</code>.</p><pre>const handle = "neo";

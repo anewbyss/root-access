@@ -1,4 +1,4 @@
-RA.lang("python", { name: "Python", tag: "PY", runtime: "py", why: "The #1 language for AI, data and automation. Runs for real here via Pyodide." });
+RA.lang("python", { name: "Python", tag: "PY", runtime: "py", why: "The #1 language for AI, data and automation. Checkpoints run on Python 3.13." });
 RA.add("python", "py", [
 { title: "First Contact", concept: "variables, types, f-strings, return",
   lesson: `<p>A variable is a name bound to a value. Python figures out the type: <code>str</code>, <code>int</code>, <code>float</code>, <code>bool</code>, <code>None</code>.</p><pre>handle = "neo"      # str

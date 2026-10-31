@@ -9,7 +9,7 @@ import SwiftUI
     }
 }
 
-struct RootView: View {
+@MainActor struct RootView: View {
     @EnvironmentObject var store: GameStore
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -21,6 +21,7 @@ struct RootView: View {
                     NavigationStack { PetScreen() }.tabItem { Label("Code Pet", systemImage: "cpu") }
                     NavigationStack { IntelScreen() }.tabItem { Label("Intel", systemImage: "doc.text.magnifyingglass") }
                     NavigationStack { BackupScreen() }.tabItem { Label("Backup", systemImage: "externaldrive.badge.icloud") }
+                    NavigationStack { EnginesScreen() }.tabItem { Label("Engines", systemImage: "server.rack") }
                 }
             }
             if let t = store.toast {

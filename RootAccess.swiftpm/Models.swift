@@ -1,20 +1,65 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-struct LessonPart { let code: Bool; let text: String }
-struct Check {
-    let pattern: String; let ci: Bool; let hint: String
-    func passes(_ src: String) -> Bool {
-        guard let re = try? NSRegularExpression(pattern: pattern, options: ci ? [.caseInsensitive] : []) else { return false }
-        return re.firstMatch(in: src, range: NSRange(src.startIndex..., in: src)) != nil
-    }
+// MARK: - Curriculum (decoded from the shared JS curriculum via Engine.swift)
+struct LessonPart: Decodable, Hashable { let code: Bool; let text: String }
+struct SourceRef: Decodable, Hashable { let label: String; let url: String }
+struct Mission: Decodable, Identifiable, Hashable {
+    let id, lang: String
+    let rank, xp: Int
+    let module, title, concept, task, starter: String
+    let lesson: [LessonPart]
+    let ciOnly: String?
+    let checkpoints: [String]
+    let solution: String
 }
-struct Mission: Identifiable {
-    let id, lang: String; let tier, xp: Int; let title, concept: String
-    let brief: [String: String]; let lesson: [LessonPart]; let task, starter: String; let checks: [Check]
+struct Lang: Decodable, Identifiable, Hashable { let id, name, tag, why, engine, ci: String }
+struct Faction: Decodable, Identifiable {
+    let id, name, short, color, handler, creed, pitch, lore: String
+    var tint: Color { Color(hex: color) }
 }
-struct Faction { let id, name, short, hex, handler, creed, pitch, lore: String; var color: Color { Color(hex: hex) } }
-struct PetPart { let id, label: String; let lvl: Int; var hex: String? = nil }
+struct DossierStat: Decodable, Hashable { let label, value: String; let source: SourceRef }
+struct Dossier: Decodable {
+    let tagline, relevance, next: String
+    let stats: [DossierStat]
+    let relSrc, learn: [SourceRef]
+    let pros, cons, bestFor, avoid: [String]
+}
+struct Intel: Decodable, Hashable { let year: Int; let name, note: String }
+struct PetStage: Decodable { let lvl: Int; let name, desc: String }
+struct PetPart: Decodable { let id, label: String; let lvl: Int; let hex: String? }
+struct PraxisStage: Decodable { let id, name, what: String }
+struct Evidence: Decodable { let claim: String; let source: SourceRef }
+struct Praxis: Decodable { let stages: [PraxisStage]; let selfExplain: [String]; let fadeAfter: Int; let evidence: [Evidence] }
+struct CurriculumData: Decodable {
+    let missions: [Mission]
+    let langs: [Lang]
+    let factions: [Faction]
+    let dossiers: [String: Dossier]
+    let modules: [String]
+    let intel: [Intel]
+    let petStages: [PetStage]
+    let petParts: [String: [PetPart]]
+    let praxis: Praxis
+    let judge0: [String: String]
+}
+
+// MARK: - Checkpoint reports (same shape as RA.buildReport)
+struct CheckResult: Decodable, Hashable { let status, label: String; let detail: String? }
+struct Report: Decodable {
+    var engine: String? = nil
+    var results: [CheckResult] = []
+    var stdout: String? = nil
+    var stderr: String? = nil
+    var status: String? = nil
+    var time: String? = nil
+    var passed: Bool? = nil
+    var ciOnly: String? = nil
+}
+struct StructureLine: Decodable { let ok: Bool; let hint: String }
+
+let EXT: [String: String] = ["python": "py", "javascript": "js", "typescript": "ts", "sql": "sql", "bash": "sh", "go": "go", "rust": "rs",
+                             "swift": "swift", "kotlin": "kt", "java": "java", "csharp": "cs", "cpp": "cpp"]
 
 extension Color {
     init(hex: String) {
@@ -26,12 +71,37 @@ extension Color {
     static let panel = Color(hex: "#06120c")
     static let line = Color(hex: "#14382a")
     static let mut = Color(hex: "#6f9c80")
+    static let bad = Color(hex: "#ff5d6c")
 }
 
-// MARK: - Save format (identical JSON to the web version)
+// MARK: - Save format v2 (identical JSON to the web version; v1 saves migrate on load)
+enum JSONValue: Codable, Equatable {
+    case string(String), number(Double), bool(Bool), array([JSONValue]), object([String: JSONValue]), null
+    init(from d: Decoder) throws {
+        let c = try d.singleValueContainer()
+        if c.decodeNil() { self = .null }
+        else if let v = try? c.decode(Bool.self) { self = .bool(v) }
+        else if let v = try? c.decode(Double.self) { self = .number(v) }
+        else if let v = try? c.decode(String.self) { self = .string(v) }
+        else if let v = try? c.decode([JSONValue].self) { self = .array(v) }
+        else { self = .object(try c.decode([String: JSONValue].self)) }
+    }
+    func encode(to e: Encoder) throws {
+        var c = e.singleValueContainer()
+        switch self {
+        case .string(let v): try c.encode(v)
+        case .number(let v): try c.encode(v)
+        case .bool(let v): try c.encode(v)
+        case .array(let v): try c.encode(v)
+        case .object(let v): try c.encode(v)
+        case .null: try c.encodeNil()
+        }
+    }
+}
+
 struct PetState: Codable, Equatable {
     var name = "NULL", color = "matrix", eyes = "dot", crown = "none", aura = "none"
-    var energy = 70, bond = 10, fed = 0
+    var energy = 70, bond = 10
     init() {}
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self); let z = PetState()
@@ -40,31 +110,79 @@ struct PetState: Codable, Equatable {
         eyes = try c.decodeIfPresent(String.self, forKey: .eyes) ?? z.eyes
         crown = try c.decodeIfPresent(String.self, forKey: .crown) ?? z.crown
         aura = try c.decodeIfPresent(String.self, forKey: .aura) ?? z.aura
-        energy = try c.decodeIfPresent(Int.self, forKey: .energy) ?? z.energy
-        bond = try c.decodeIfPresent(Int.self, forKey: .bond) ?? z.bond
-        fed = try c.decodeIfPresent(Int.self, forKey: .fed) ?? z.fed
+        energy = (try? c.decodeIfPresent(Int.self, forKey: .energy)) ?? z.energy
+        bond = (try? c.decodeIfPresent(Int.self, forKey: .bond)) ?? z.bond
     }
 }
+
+struct EngineSettings: Codable, Equatable {
+    var ce = "https://ce.judge0.com", extra = "https://extra-ce.judge0.com", token = "", tokenHeader = "X-Auth-Token"
+    init() {}
+    init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self); let z = EngineSettings()
+        ce = try c.decodeIfPresent(String.self, forKey: .ce) ?? z.ce
+        extra = try c.decodeIfPresent(String.self, forKey: .extra) ?? z.extra
+        token = try c.decodeIfPresent(String.self, forKey: .token) ?? z.token
+        tokenHeader = try c.decodeIfPresent(String.self, forKey: .tokenHeader) ?? z.tokenHeader
+    }
+}
+
 struct SaveData: Codable, Equatable {
-    var format = "rootaccess-save", version = 1
+    var format = "rootaccess-save", version = 2
     var faction: String? = nil
     var xp = 0
     var done: [String] = []
+    var verified: [String: String] = [:]   // id -> judge0 | ci | local | offline
     var code: [String: String] = [:]
+    var fails: [String: Int] = [:]
+    var primm: [String: Int] = [:]
+    var notes: [String: String] = [:]
+    var legacy: [String: JSONValue] = [:]
     var pet = PetState()
+    var settings = EngineSettings()
     var updated: Double = Date().timeIntervalSince1970 * 1000
     init() {}
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         format = try c.decode(String.self, forKey: .format)
         guard format == "rootaccess-save" else { throw CocoaError(.fileReadCorruptFile) }
-        version = try c.decodeIfPresent(Int.self, forKey: .version) ?? 1
-        faction = try c.decodeIfPresent(String.self, forKey: .faction)
-        xp = try c.decodeIfPresent(Int.self, forKey: .xp) ?? 0
-        done = try c.decodeIfPresent([String].self, forKey: .done) ?? []
-        code = try c.decodeIfPresent([String: String].self, forKey: .code) ?? [:]
-        pet = try c.decodeIfPresent(PetState.self, forKey: .pet) ?? PetState()
-        updated = try c.decodeIfPresent(Double.self, forKey: .updated) ?? 0
+        version = (try? c.decodeIfPresent(Int.self, forKey: .version)) ?? 1
+        faction = try? c.decodeIfPresent(String.self, forKey: .faction)
+        xp = (try? c.decodeIfPresent(Int.self, forKey: .xp)) ?? 0
+        done = (try? c.decodeIfPresent([String].self, forKey: .done)) ?? []
+        verified = (try? c.decodeIfPresent([String: String].self, forKey: .verified)) ?? [:]
+        code = (try? c.decodeIfPresent([String: String].self, forKey: .code)) ?? [:]
+        fails = (try? c.decodeIfPresent([String: Int].self, forKey: .fails)) ?? [:]
+        primm = (try? c.decodeIfPresent([String: Int].self, forKey: .primm)) ?? [:]
+        notes = (try? c.decodeIfPresent([String: String].self, forKey: .notes)) ?? [:]
+        legacy = (try? c.decodeIfPresent([String: JSONValue].self, forKey: .legacy)) ?? [:]
+        pet = (try? c.decodeIfPresent(PetState.self, forKey: .pet)) ?? PetState()
+        settings = (try? c.decodeIfPresent(EngineSettings.self, forKey: .settings)) ?? EngineSettings()
+        updated = (try? c.decodeIfPresent(Double.self, forKey: .updated)) ?? 0
+    }
+
+    /// Same rules as migrate() in web/app.js: unknown mission ids are archived under `legacy`, never dropped.
+    func migrated(known: Set<String>) -> SaveData {
+        var s = self, seen = Set<String>()
+        let gone = s.done.filter { !known.contains($0) }
+        s.done = s.done.filter { known.contains($0) && seen.insert($0).inserted }
+        if !gone.isEmpty {
+            var prev: [JSONValue] = []
+            if case .array(let a)? = s.legacy["done"] { prev = a }
+            s.legacy["done"] = .array(prev + gone.map { .string($0) })
+        }
+        let lostCode = s.code.filter { !known.contains($0.key) }
+        if !lostCode.isEmpty {
+            var prev: [String: JSONValue] = [:]
+            if case .object(let o)? = s.legacy["code"] { prev = o }
+            for (k, v) in lostCode { prev[k] = .string(v) }
+            s.legacy["code"] = .object(prev)
+            s.code = s.code.filter { known.contains($0.key) }
+        }
+        s.verified = s.verified.filter { known.contains($0.key) }
+        for id in s.done where s.verified[id] == nil { s.verified[id] = "offline" }
+        s.version = 2
+        return s
     }
 }
 struct Snapshot: Codable, Identifiable { var id = UUID(); let at: Date; let label: String; let data: SaveData }
@@ -80,6 +198,27 @@ struct SaveDocument: FileDocument {
     func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper { FileWrapper(regularFileWithContents: try GameStore.encode(save)) }
 }
 
+/// A folder of mission source files, laid out exactly like the repo's submissions/ directory.
+struct SubmissionsFolder: FileDocument {
+    static var readableContentTypes: [UTType] { [.folder] }
+    var files: [String: String]
+    init(files: [String: String]) { self.files = files }
+    init(configuration: ReadConfiguration) throws { files = [:] }
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+        var kids: [String: FileWrapper] = [:]
+        for (name, text) in files { let w = FileWrapper(regularFileWithContents: Data(text.utf8)); w.preferredFilename = name; kids[name] = w }
+        return FileWrapper(directoryWithFileWrappers: kids)
+    }
+}
+
+struct SourceFile: FileDocument {
+    static var readableContentTypes: [UTType] { [.plainText] }
+    var text: String
+    init(text: String) { self.text = text }
+    init(configuration: ReadConfiguration) throws { text = String(decoding: configuration.file.regularFileContents ?? Data(), as: UTF8.self) }
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper { FileWrapper(regularFileWithContents: Data(text.utf8)) }
+}
+
 // MARK: - Store with autosave + rolling snapshots on disk
 @MainActor final class GameStore: ObservableObject {
     @Published var s = SaveData() { didSet { persist() } }
@@ -89,9 +228,10 @@ struct SaveDocument: FileDocument {
     private let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
     private var saveURL: URL { dir.appendingPathComponent("rootaccess-save.json") }
     private var snapURL: URL { dir.appendingPathComponent("rootaccess-snapshots.json") }
+    private var known: Set<String> { Set(CUR.missions.map(\.id)) }
 
     init() {
-        if let d = try? Data(contentsOf: saveURL), let v = try? JSONDecoder().decode(SaveData.self, from: d) { s = v }
+        if let d = try? Data(contentsOf: saveURL), let v = try? JSONDecoder().decode(SaveData.self, from: d) { s = v.migrated(known: known) }
         if let d = try? Data(contentsOf: snapURL), let v = try? JSONDecoder().decode([Snapshot].self, from: d) { snapshots = v }
     }
     static func encode(_ v: SaveData) throws -> Data {
@@ -100,34 +240,52 @@ struct SaveDocument: FileDocument {
     private func persist() { try? GameStore.encode(s).write(to: saveURL, options: .atomic) }
     func snapshot(_ label: String) {
         snapshots.insert(Snapshot(at: Date(), label: label, data: s), at: 0)
-        snapshots = Array(snapshots.prefix(8))
+        snapshots = Array(snapshots.prefix(10))
         try? JSONEncoder().encode(snapshots).write(to: snapURL, options: .atomic)
     }
-    func restore(_ d: SaveData, label: String) { snapshot("Before \(label)"); s = d; flash("Save restored") }
+    func restore(_ d: SaveData, label: String) { snapshot("Before \(label)"); s = d.migrated(known: known); flash("Save restored") }
     func restore(json: String, label: String) {
         guard let d = json.data(using: .utf8), let v = try? JSONDecoder().decode(SaveData.self, from: d) else { flash("That isn't a ROOT//ACCESS save"); return }
         restore(v, label: label)
     }
     var json: String { (try? String(data: GameStore.encode(s), encoding: .utf8)) ?? "{}" }
 
-    var level: Int { 1 + s.xp / 220 }
-    var progress: Double { Double(s.xp % 220) / 220 }
-    var faction: Faction? { s.faction.flatMap { FACTIONS[$0] } }
-    var accent: Color { faction?.color ?? .matrix }
-    var stageIndex: Int { PET_STAGES.lastIndex { level >= $0.lvl } ?? 0 }
+    var level: Int { 1 + s.xp / 500 }
+    var progress: Double { Double(s.xp % 500) / 500 }
+    var faction: Faction? { CUR.factions.first { $0.id == s.faction } }
+    var accent: Color { faction?.tint ?? .matrix }
+    var stageIndex: Int { CUR.petStages.lastIndex { level >= $0.lvl } ?? 0 }
 
-    func complete(_ m: Mission) -> Bool {
-        guard !s.done.contains(m.id) else { return false }
+    func missions(_ lang: String) -> [Mission] { CUR.missions.filter { $0.lang == lang }.sorted { $0.rank < $1.rank } }
+    func isDone(_ m: Mission) -> Bool { s.done.contains(m.id) }
+    func fluency(_ lang: String) -> Int { missions(lang).filter(isDone).count }
+    func unlocked(_ m: Mission) -> Bool {
+        guard m.rank > 1, let prev = missions(m.lang).first(where: { $0.rank == m.rank - 1 }) else { return true }; return isDone(prev) }
+    func next(after m: Mission) -> Mission? { missions(m.lang).first { $0.rank == m.rank + 1 } }
+
+    func fail(_ m: Mission) { s.fails[m.id, default: 0] += 1 }
+    /// how: judge0 | ci | local | offline. Same ordering as the web app.
+    @discardableResult func clear(_ m: Mission, how: String) -> Bool {
+        let order = ["offline": 0, "ci": 1, "local": 2, "judge0": 3]
+        if order[how, default: 0] > order[s.verified[m.id] ?? "", default: -1] { s.verified[m.id] = how }
+        guard !isDone(m) else { return false }
         let before = level
         s.done.append(m.id); s.xp += m.xp
-        s.pet.energy = min(100, s.pet.energy + 20); s.pet.bond = min(100, s.pet.bond + 8)
+        s.pet.energy = min(100, s.pet.energy + 15); s.pet.bond = min(100, s.pet.bond + 6)
         s.updated = Date().timeIntervalSince1970 * 1000
-        snapshot("Cleared \(m.title)")
-        flash(level > before ? "LEVEL \(level) — your pet is evolving" : "+\(m.xp) XP")
+        snapshot("Cleared \(m.id): \(m.title)")
+        let name = CUR.langs.first { $0.id == m.lang }?.name ?? m.lang
+        flash(fluency(m.lang) == 12 ? "\(name) fluency complete" : level > before ? "LEVEL \(level): your pet is evolving" : "+\(m.xp) XP")
         return true
     }
-    func unlocked(_ m: Mission) -> Bool {
-        m.tier == 1 || MISSIONS.contains { $0.lang == m.lang && $0.tier < m.tier && s.done.contains($0.id) } || level >= m.tier * 2
+    var submissions: [String: String] {
+        var out: [String: String] = [:]
+        for (id, code) in s.code { if let m = CUR.missions.first(where: { $0.id == id }), code != m.starter { out["\(id).\(EXT[m.lang] ?? "txt")"] = code } }
+        return out
     }
     func flash(_ t: String) { toast = t; Task { try? await Task.sleep(for: .seconds(2.4)); if toast == t { toast = nil } } }
+}
+
+func verLabel(_ v: String?) -> String {
+    switch v { case "judge0": return "verified · Judge0"; case "local": return "verified · local"; case "ci": return "pending · GitHub Actions"; default: return "structure only" }
 }
