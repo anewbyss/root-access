@@ -1,11 +1,10 @@
-# ROOT//ACCESS — Swift Playgrounds edition
+# ROOT//ACCESS for Swift Playgrounds
 
-Open `RootAccess.swiftpm` in Swift Playgrounds 4.4+ (iPad or Mac) or Xcode 15+, then press Run. Requires iOS/iPadOS 17.
+Open this folder in Swift Playgrounds 4.4+ (iPad or Mac) or Xcode 15+. Requires iOS/iPadOS 17.
 
-- Same 23 missions, 12 languages, 3 factions and code pet as the web version.
-- Autosaves to the app's Documents folder, keeps 8 rolling snapshots.
-- Backup tab: export to Files/iCloud Drive, share, copy JSON, restore from file or clipboard.
-- Backups are the same JSON format as the web version, so progress moves both ways.
+- Same 144 missions, faction briefs, dossiers and pet as the web app. `Curriculum.swift` embeds the shared JavaScript curriculum, and `Engine.swift` runs it in JavaScriptCore, so checkpoint harnesses are identical to the web app and GitHub Actions.
+- Run external checkpoints: your code is composed with the mission's harness and sent to Judge0 over URLSession. Set your own Judge0 host or token in the Engines tab.
+- CI-only missions (go12, sw10–12, kt10, kt12, jv11, jv12) run structure checks here and export a file for `submissions/`.
+- Backups: autosave to the app's Documents folder, 10 rolling snapshots, export/import JSON through Files or iCloud Drive, share sheet, clipboard, and an Export submissions folder button. The JSON is the same v2 format as the web app; v1 saves upgrade on load.
 
-Missions are pattern-graded (the web version also live-runs the JavaScript missions).
-`Content.swift` is generated from the web version's `data.js`.
+Regenerate `Curriculum.swift` after editing `curriculum/`: `node tools/build.js && node tools/gen-swift.js`.

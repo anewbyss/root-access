@@ -234,7 +234,7 @@ struct SourceFile: FileDocument {
         if let d = try? Data(contentsOf: saveURL), let v = try? JSONDecoder().decode(SaveData.self, from: d) { s = v.migrated(known: known) }
         if let d = try? Data(contentsOf: snapURL), let v = try? JSONDecoder().decode([Snapshot].self, from: d) { snapshots = v }
     }
-    static func encode(_ v: SaveData) throws -> Data {
+    nonisolated static func encode(_ v: SaveData) throws -> Data {
         let e = JSONEncoder(); e.outputFormatting = [.prettyPrinted, .sortedKeys]; return try e.encode(v)
     }
     private func persist() { try? GameStore.encode(s).write(to: saveURL, options: .atomic) }
