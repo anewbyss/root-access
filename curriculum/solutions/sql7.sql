@@ -1,0 +1,1 @@
+WITH f AS (SELECT agent_id, COUNT(*) c FROM events WHERE status='failed' GROUP BY agent_id) SELECT a.name, f.c FROM f JOIN agents a ON a.id=f.agent_id WHERE f.c=(SELECT MAX(c) FROM f) ORDER BY a.name;

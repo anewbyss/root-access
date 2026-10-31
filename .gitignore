@@ -1,0 +1,8 @@
+node_modules/
+.ci-lib/
+*.log
+.DS_Store
+/report-*.json
+/submissions-*.json
+.build/
+.swiftpm/xcode/

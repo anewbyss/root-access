@@ -1,0 +1,1 @@
+CREATE VIEW threat_board AS SELECT e.ip, COUNT(*) AS fails, COUNT(DISTINCT a.name) AS agents, MAX(e.ts) AS last_seen FROM events e JOIN agents a ON a.id=e.agent_id WHERE e.status='failed' GROUP BY e.ip; SELECT * FROM threat_board ORDER BY fails DESC, ip;

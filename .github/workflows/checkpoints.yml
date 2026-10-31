@@ -1,0 +1,100 @@
+# Mission checkpoints on current toolchains.
+# - Push to main / PRs: verifies every reference solution passes and every starter fails.
+# - If submissions/ contains exported learner files (<mission-id>.<ext>), those are graded too.
+name: checkpoints
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      only:
+        description: "Comma-separated mission ids (blank = all)"
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    name: ${{ matrix.lang }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        lang: [python, javascript, typescript, sql, bash, go, rust, kotlin, java, csharp, cpp]
+    env:
+      RA_LIB: ${{ github.workspace }}/.ci-lib
+      CXX: g++-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - if: matrix.lang == 'python' || matrix.lang == 'sql'
+        uses: actions/setup-python@v5
+        with: { python-version: "3.13" }
+      - if: matrix.lang == 'typescript'
+        run: npm install -g typescript@5.6
+      - if: matrix.lang == 'bash'
+        run: sudo apt-get update && sudo apt-get install -y jq
+      - if: matrix.lang == 'go'
+        uses: actions/setup-go@v5
+        with: { go-version: stable }
+      - if: matrix.lang == 'rust'
+        uses: dtolnay/rust-toolchain@stable
+      - if: matrix.lang == 'kotlin' || matrix.lang == 'java'
+        uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: "25" }
+      - if: matrix.lang == 'kotlin'
+        name: Kotlin compiler + kotlinx.coroutines
+        run: |
+          mkdir -p "$RA_LIB"
+          curl -fsSL -o /tmp/kotlinc.zip https://github.com/JetBrains/kotlin/releases/download/v2.2.20/kotlin-compiler-2.2.20.zip
+          unzip -q /tmp/kotlinc.zip -d /opt && echo "/opt/kotlinc/bin" >> "$GITHUB_PATH"
+          curl -fsSL -o "$RA_LIB/coroutines.jar" https://repo1.maven.org/maven2/org/jetbrains/kotlinx/kotlinx-coroutines-core-jvm/1.10.2/kotlinx-coroutines-core-jvm-1.10.2.jar
+      - if: matrix.lang == 'java'
+        name: JUnit 5
+        run: |
+          mkdir -p "$RA_LIB"
+          curl -fsSL -o "$RA_LIB/junit.jar" https://repo1.maven.org/maven2/org/junit/platform/junit-platform-console-standalone/1.12.2/junit-platform-console-standalone-1.12.2.jar
+      - if: matrix.lang == 'csharp'
+        uses: actions/setup-dotnet@v4
+        with: { dotnet-version: "10.0.x" }
+      - if: matrix.lang == 'cpp'
+        run: command -v g++-14 || (sudo apt-get update && sudo apt-get install -y g++-14)
+      - name: Reference solutions pass
+        run: node tools/checkpoints.js --lang ${{ matrix.lang }} ${{ inputs.only && format('--only {0}', inputs.only) || '' }} --json report-${{ matrix.lang }}.json
+      - name: Starter code fails
+        run: node tools/checkpoints.js --lang ${{ matrix.lang }} --starter
+      - name: Grade learner submissions
+        if: hashFiles('submissions/*.*') != hashFiles('submissions/README.md') && hashFiles('submissions/*.*') != ''
+        run: node tools/checkpoints.js --lang ${{ matrix.lang }} --dir submissions --json submissions-${{ matrix.lang }}.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: checkpoints-${{ matrix.lang }}
+          path: "*-${{ matrix.lang }}.json"
+          if-no-files-found: ignore
+
+  swift:
+    name: swift
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: swift --version
+      - name: Reference solutions pass
+        run: node tools/checkpoints.js --lang swift ${{ inputs.only && format('--only {0}', inputs.only) || '' }} --json report-swift.json
+      - name: Starter code fails
+        run: node tools/checkpoints.js --lang swift --starter
+      - name: Grade learner submissions
+        if: hashFiles('submissions/*.*') != hashFiles('submissions/README.md') && hashFiles('submissions/*.*') != ''
+        run: node tools/checkpoints.js --lang swift --dir submissions --json submissions-swift.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: checkpoints-swift
+          path: "*-swift.json"
+          if-no-files-found: ignore
