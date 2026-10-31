@@ -218,7 +218,7 @@ function missionView(v, m) {
     const lines = rep.results.map((r) => `<span class="${r.status === "PASS" ? "ok" : r.status === "SKIP" ? "mut" : "bad"}">${r.status === "PASS" ? "[✓]" : r.status === "SKIP" ? "[~]" : "[✗]"}</span> ${esc(r.label)}${r.status !== "PASS" && r.detail ? ` <span class="mut">— ${esc(r.detail)}</span>` : ""}`);
     const user = (rep.stdout || "").split("\n").filter((l) => l && !/::cp::/.test(l)).slice(0, 12).join("\n");
     out.innerHTML = `<span class="mut">${how === "local" ? "IN-BROWSER FALLBACK (Judge0 unreachable)" : "ENGINE // " + esc(rep.engine || RA.ENGINES[m.lang].label)}${rep.time ? " · " + rep.time + "s" : ""}</span>\n${lines.join("\n")}${user ? `\n\n<span class="mut">stdout</span>\n${esc(user)}` : ""}${rep.stderr && !ok ? `\n\n<span class="mut">stderr</span>\n${esc(rep.stderr.slice(0, 600))}` : ""}`;
-    if (ok) clear(how); else fail();
+    if (ok) clear(how); else { fail(); out.insertAdjacentHTML("beforeend", `\n\n<span class="bad">ACCESS DENIED.</span> Fix the failing checkpoints and run again.`); }
   };
   function fail() {
     S.fails[m.id] = (S.fails[m.id] || 0) + 1; save();
