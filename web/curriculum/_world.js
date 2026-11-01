@@ -1,4 +1,4 @@
-// ROOT//ACCESS world data: factions, real-world intel, pet evolution. Shared by web + Swift generator.
+// ROOT//ACCESS world data: factions and real-world intel. Shared by web + Swift generator.
 (function (g) {
   const RA = g.RA = g.RA || {};
   RA.FACTIONS = {
@@ -54,43 +54,6 @@
 ];
 
 // Pet evolution stages (unlocked by player level)
-RA.PET_STAGES = [
-  { lvl: 1, name: "Seed Packet", desc: "A blinking cursor with ambitions." },
-  { lvl: 3, name: "Bytling", desc: "It has learned to want things. Mostly semicolons." },
-  { lvl: 5, name: "Daemon", desc: "Runs in the background. Watches your commits." },
-  { lvl: 8, name: "Construct", desc: "Multi-threaded. Has opinions about tabs vs spaces." },
-  { lvl: 12, name: "Oracle", desc: "It finished the training run. It is aware of you." }
-];
-
-RA.PET_PARTS = {
-  color: [
-    { id: "matrix", label: "Matrix", val: "#3dff7a", lvl: 1 },
-    { id: "ice", label: "ICE", val: "#5ad1ff", lvl: 1 },
-    { id: "violet", label: "Liturgy", val: "#c79bff", lvl: 2 },
-    { id: "ember", label: "Ember", val: "#ff8a4c", lvl: 4 },
-    { id: "gold", label: "Root Gold", val: "#ffd84d", lvl: 7 },
-    { id: "void", label: "Null Void", val: "#f2f2f2", lvl: 10 }
-  ],
-  eyes: [
-    { id: "dot", label: "Dots", lvl: 1 },
-    { id: "visor", label: "Visor", lvl: 2 },
-    { id: "cyclops", label: "Cyclops", lvl: 4 },
-    { id: "glyph", label: "Glyph", lvl: 6 },
-    { id: "trinary", label: "Trinary", lvl: 9 }
-  ],
-  crown: [
-    { id: "none", label: "None", lvl: 1 },
-    { id: "antenna", label: "Antenna", lvl: 2 },
-    { id: "horns", label: "Daemon Horns", lvl: 5 },
-    { id: "halo", label: "Halo", lvl: 7 },
-    { id: "crown", label: "Root Crown", lvl: 11 }
-  ],
-  aura: [
-    { id: "none", label: "None", lvl: 1 },
-    { id: "rain", label: "Code Rain", lvl: 3 },
-    { id: "rings", label: "Orbit Rings", lvl: 6 },
-    { id: "glitch", label: "Glitch", lvl: 9 }
-  ]
-};
+// Pet stages, parts, renderer and personality live in curriculum/_pet.js.
 
 })(typeof window !== "undefined" ? window : globalThis);

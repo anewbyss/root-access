@@ -2,6 +2,7 @@
   "order": [
     "_core",
     "_world",
+    "_pet",
     "_dossiers",
     "_engine",
     "_local",

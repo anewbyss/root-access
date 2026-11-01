@@ -73,6 +73,46 @@ final class Engine: @unchecked Sendable {
     }
 }
 
+// MARK: - Pet art and personality (curriculum/_pet.js)
+/// One shape from RA.petArt on a 200x200 canvas. `layer` says how it animates (back, body, spin, rain, blink).
+struct ArtItem: Decodable {
+    let layer, k: String
+    var cx: Double?, cy: Double?, rx: Double?, ry: Double?, x: Double?, y: Double?, w2: Double?, h: Double?, r: Double?
+    var w: Double?, s: Double?, op: Double?, fo: Double?, dur: Double?
+    var fill: String?, stroke: String?, t: String?
+    var pts: [[Double]]?
+    var segs: [[JSONValue]]?
+}
+/// The parts of a persona export the app displays; the full JSON is exported untouched.
+struct PersonaSummary: Decodable {
+    struct Voice: Decodable { let tone: [String]; let greeting, signoff: String; let catchphrases, quirks: [String] }
+    struct Prompt: Decodable { let system: String }
+    struct TraitLabel: Decodable { let id, label, low, high: String }
+    struct Scale: Decodable { let labels: [TraitLabel] }
+    let name, archetype, summary: String
+    let traits: [String: Double]
+    let traitScale: Scale
+    let voice: Voice
+    let prompt: Prompt
+}
+
+extension Engine {
+    func petArt(_ pet: PetState, stage: Int) -> [ArtItem] {
+        guard let pj = try? JSONEncoder().encode(pet) else { return [] }
+        return (try? JSONDecoder().decode([ArtItem].self, from: Data(call("petArt", [String(decoding: pj, as: UTF8.self), stage]).utf8))) ?? []
+    }
+    /// Full `rootaccess-persona` JSON (pretty-printed) for a save. See docs/PERSONA.md.
+    func personaJSON(_ save: SaveData) -> String {
+        guard let d = try? GameStore.encode(save) else { return "{}" }
+        return call("persona", [String(decoding: d, as: UTF8.self)])
+    }
+    func personaCard(_ save: SaveData) -> String {
+        guard let d = try? GameStore.encode(save) else { return "" }
+        return call("personaCard", [String(decoding: d, as: UTF8.self)])
+    }
+    func persona(_ save: SaveData) -> PersonaSummary? { try? JSONDecoder().decode(PersonaSummary.self, from: Data(personaJSON(save).utf8)) }
+}
+
 // MARK: - On-device runner (JavaScript missions, no network needed)
 extension Engine {
     func canRunLocally(_ m: Mission) -> Bool { m.ciOnly == nil && data.local?[m.lang] == "js" }

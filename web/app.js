@@ -36,7 +36,7 @@ const fresh = () => ({
   done: [],            // cleared mission ids (shared with the Swift app)
   verified: {},        // id -> "judge0" | "ci" (pending GitHub Actions) | "local" | "offline"
   code: {}, fails: {}, primm: {}, notes: {}, hints: {}, legacy: {},
-  pet: { name: "NULL", color: "matrix", eyes: "dot", crown: "none", aura: "none", energy: 70, bond: 10 },
+  pet: Object.assign({}, RA.PET_DEFAULTS),   // parts, stats, and `persona` overrides (see curriculum/_pet.js)
   // mode: "auto" (on-device when the pack is ready, else Judge0) | "judge0" (Judge0 first) | "device" (never send code out)
   settings: { ce: RA.judge0Hosts.ce, extra: RA.judge0Hosts.extra, token: "", tokenHeader: "X-Auth-Token",
     mode: "auto", offlineClears: true, autoReverify: true, packBase: {} },
@@ -52,7 +52,7 @@ const ACCENTS = { matrix: "#3dff7a", ice: "#5ad1ff", violet: "#c79bff", ember: "
 // Accepts v1 saves (23-mission prototype) and v2. Unknown mission ids are kept under `legacy` so nothing is lost.
 function migrate(d) {
   const s = Object.assign(fresh(), d);
-  s.pet = Object.assign(fresh().pet, d.pet || {});
+  s.pet = Object.assign({}, RA.PET_DEFAULTS, d.pet || {});
   s.settings = Object.assign(fresh().settings, d.settings || {});
   s.prefs = Object.assign(defaultPrefs(), d.prefs || {});
   s.legacy = Object.assign({}, d.legacy || {});
@@ -497,51 +497,79 @@ function intel(v) {
 }
 
 // ---------- pet ----------
-const stage = () => [...RA.PET_STAGES].reverse().find((s) => level() >= s.lvl);
-function petSVG(p) {
-  const col = RA.PET_PARTS.color.find((c) => c.id === p.color)?.val || "#3dff7a";
-  const st = RA.PET_STAGES.indexOf(stage()), r = 34 + st * 8;
-  const hex = (k, rot = -Math.PI / 2) => [0, 1, 2, 3, 4, 5].map((i) => { const a = (Math.PI / 3) * i + rot; return `${100 + Math.cos(a) * r * k},${112 + Math.sin(a) * r * k}`; }).join(" ");
-  const body = st === 0 ? `<rect x="${100 - r}" y="${110 - r}" width="${r * 2}" height="${r * 2}" rx="6" fill="none" stroke="${col}" stroke-width="3"/><rect x="92" y="96" width="16" height="26" fill="${col}"><animate attributeName="opacity" values="1;0;1" dur="1s" repeatCount="indefinite"/></rect>`
-    : st === 1 ? `<ellipse cx="100" cy="112" rx="${r}" ry="${r * 0.85}" fill="${col}22" stroke="${col}" stroke-width="3"/>`
-    : st === 2 ? `<path d="M${100 - r} 130 Q100 ${60 - st * 4} ${100 + r} 130 Q100 ${150 + r * 0.4} ${100 - r} 130Z" fill="${col}22" stroke="${col}" stroke-width="3"/><path d="M${100 - r} 130 l-14 18 M${100 + r} 130 l14 18" stroke="${col}" stroke-width="3"/>`
-    : `<polygon points="${hex(1)}" fill="${col}22" stroke="${col}" stroke-width="3"/>${st === 4 ? `<polygon points="${hex(0.6, 0)}" fill="none" stroke="${col}" stroke-width="1.5"/>` : ""}`;
-  const ey = 106;
-  const eyes = st === 0 ? "" : ({
-    dot: `<circle cx="86" cy="${ey}" r="5" fill="${col}"/><circle cx="114" cy="${ey}" r="5" fill="${col}"/>`,
-    visor: `<rect x="74" y="${ey - 6}" width="52" height="12" rx="6" fill="${col}"/>`,
-    cyclops: `<circle cx="100" cy="${ey}" r="11" fill="none" stroke="${col}" stroke-width="3"/><circle cx="100" cy="${ey}" r="4" fill="${col}"/>`,
-    glyph: `<text x="100" y="${ey + 6}" text-anchor="middle" font-size="18" fill="${col}" font-family="JetBrains Mono">&lt;/&gt;</text>`,
-    trinary: `<circle cx="82" cy="${ey}" r="4" fill="${col}"/><circle cx="100" cy="${ey - 8}" r="4" fill="${col}"/><circle cx="118" cy="${ey}" r="4" fill="${col}"/>`
-  })[p.eyes];
-  const top = 112 - r;
-  const crown = ({ none: "", antenna: `<path d="M100 ${top} v-22" stroke="${col}" stroke-width="2"/><circle cx="100" cy="${top - 24}" r="4" fill="${col}"/>`,
-    horns: `<path d="M80 ${top + 8} l-10 -22 l18 14 M120 ${top + 8} l10 -22 l-18 14" fill="${col}" stroke="${col}" stroke-width="2"/>`,
-    halo: `<ellipse cx="100" cy="${top - 14}" rx="26" ry="6" fill="none" stroke="${col}" stroke-width="3"/>`,
-    crown: `<path d="M74 ${top - 2} l6 -22 l10 12 l10 -18 l10 18 l10 -12 l6 22z" fill="${col}"/>` })[p.crown];
-  const aura = ({ none: "", rain: [...Array(9)].map((_, i) => `<text x="${20 + i * 20}" y="0" font-size="11" fill="${col}" opacity=".5" font-family="JetBrains Mono">${i % 2}<animate attributeName="y" from="0" to="200" dur="${2 + (i % 3)}s" repeatCount="indefinite"/></text>`).join(""),
-    rings: `<g class="spin"><ellipse cx="100" cy="100" rx="90" ry="30" fill="none" stroke="${col}" opacity=".4"/><circle cx="190" cy="100" r="4" fill="${col}"/></g>`, glitch: "" })[p.aura];
-  return `<svg viewBox="0 0 200 200" role="img" aria-label="${esc(p.name)}, ${stage().name}">${aura}<g class="bob ${p.aura === "glitch" ? "glitch" : ""}" style="filter:drop-shadow(0 0 8px ${col})">${crown}${body}${eyes}</g></svg>`;
-}
+const stage = () => RA.PET_STAGES[RA.petStage(level())];
+const petCtx = () => ({ level: level(), fluent: LANGS12.filter((L) => fluency(L) === 12).length, faction: S.faction });
+const PET_TABS = [["color", "Core colour"], ["trim", "Trim colour"], ["shape", "Body"], ["eyes", "Optics"], ["mouth", "Mouth"], ["markings", "Markings"], ["crown", "Crown"], ["accessory", "Accessory"], ["aura", "Aura"]];
+let petTab = "look";
 function pet(v) {
-  const p = S.pet, lv = level(), st = stage(), next = RA.PET_STAGES.find((s) => s.lvl > lv);
+  const p = S.pet, lv = level(), st = stage(), si = RA.petStage(lv), next = RA.PET_STAGES[si + 1], ctx = petCtx();
   const fluent = LANGS12.filter((L) => fluency(L) === 12);
-  const opts = (key, label) => `<h3>${label}</h3><div class="opts">${RA.PET_PARTS[key].map((o) => { const lock = lv < o.lvl;
-    return `<button data-k="${key}" data-v="${o.id}" class="${p[key] === o.id ? "on" : ""}" ${lock ? "disabled" : ""}>${o.label}${lock ? ` <span class="lock">LVL ${o.lvl}</span>` : ""}</button>`; }).join("")}</div>`;
-  v.innerHTML = `<div class="pet"><div class="panel"><div class="petstage">${petSVG(p)}</div>
+  const total = RA.PET_KEYS.reduce((n, k) => n + RA.PET_PARTS[k].length, 0), open = RA.PET_KEYS.reduce((n, k) => n + RA.PET_PARTS[k].filter((o) => !RA.petLock(o, ctx)).length, 0);
+  const sw = (o) => (o.val ? `<span class="swatch" style="background:${o.val}"></span> ` : "");
+  const opts = (key, label) => `<h3>${label}</h3><div class="opts">${RA.PET_PARTS[key].map((o) => { const lock = RA.petLock(o, ctx);
+    return `<button data-k="${key}" data-v="${o.id}" class="${p[key] === o.id ? "on" : ""}" ${lock ? "disabled" : ""} aria-pressed="${p[key] === o.id}">${sw(o)}${esc(o.label)}${lock ? ` <span class="lock">${esc(lock)}</span>` : ""}</button>`; }).join("")}</div>`;
+  const look = `<p class="mut">FORM ${si + 1}/${RA.PET_STAGES.length}</p><h2>${st.name}</h2><p>${st.desc}</p>
+    <p class="mut">${next ? `Next evolution: <b class="acc">${next.name}</b> at level ${next.lvl}. Parts unlock with your level, with languages you take to fluency, and with your faction.` : "Final form reached. It knows what you know."} <b>${open}/${total}</b> parts unlocked.</p>
+    <div class="row"><button id="randomize">Randomize (unlocked parts)</button><button id="resetLook">Reset look</button></div>
+    ${PET_TABS.map(([k, l]) => opts(k, l)).join("")}`;
+  v.innerHTML = `<div class="pet"><div class="panel"><div class="petstage">${RA.petSVG(p, si, { animate: !reduceMotion() })}</div>
     <div class="row" style="margin-top:12px"><input id="pname" value="${esc(p.name)}" maxlength="16" aria-label="Pet name" class="field" style="flex:1"><button id="feed">Feed a commit</button></div>
     <div class="stat"><span>Energy</span><div class="bar"><i style="width:${p.energy}%"></i></div></div>
     <div class="stat"><span>Bond</span><div class="bar"><i style="width:${p.bond}%"></i></div></div>
-    <h3 style="margin-top:14px">Languages it speaks</h3><div class="glyphs">${LANGS12.map((L) => `<span class="chip ${fluency(L) === 12 ? "ok" : ""}" title="${RA.langs[L].name}: ${fluency(L)}/12">${RA.langs[L].tag} ${fluency(L)}</span>`).join("")}</div></div>
-  <div class="panel"><p class="mut">FORM ${RA.PET_STAGES.indexOf(st) + 1}/${RA.PET_STAGES.length}</p><h2>${st.name}</h2><p>${st.desc}</p>
-    <p class="mut">${next ? `Next evolution: <b class="acc">${next.name}</b> at level ${next.lvl}. Your pet only grows as far as your skills do: parts unlock with your level, and each language you take to fluency adds a glyph.` : "Final form reached. It knows what you know."}</p>
-    <p class="mut">Cleared ${S.done.length}/${RA.missions.length} · Fluent in ${fluent.length}/12</p>
-    ${opts("color", "Core color")}${opts("eyes", "Optics")}${opts("crown", "Crown")}${opts("aura", "Aura")}</div></div>`;
+    <h3 style="margin-top:14px">Languages it speaks</h3><div class="glyphs">${LANGS12.map((L) => `<span class="chip ${fluency(L) === 12 ? "ok" : ""}" title="${RA.langs[L].name}: ${fluency(L)}/12">${fluency(L) === 12 ? "✓ " : ""}${RA.langs[L].tag} ${fluency(L)}</span>`).join("")}</div>
+    <p class="mut tiny" style="margin-top:10px">Cleared ${S.done.length}/${RA.missions.length} · Fluent in ${fluent.length}/12</p></div>
+  <div class="panel"><div class="row tabs"><button data-pt="look" class="${petTab === "look" ? "on" : ""}">Look</button><button data-pt="persona" class="${petTab === "persona" ? "on" : ""}">Personality</button></div><div id="pettab">${petTab === "look" ? look : ""}</div></div></div>`;
+  if (petTab === "persona") personaPanel($("#pettab"));
   v.onclick = (e) => {
-    const b = e.target.closest("[data-k]"); if (b && !b.disabled) { p[b.dataset.k] = b.dataset.v; save(); render(); }
+    const t = e.target.closest("[data-pt]")?.dataset.pt; if (t) { petTab = t; render(); return; }
+    const b = e.target.closest("[data-k]"); if (b && !b.disabled) { p[b.dataset.k] = b.dataset.v; save(); render(); return; }
+    if (e.target.id === "randomize") {
+      RA.PET_KEYS.forEach((k) => { const ok = RA.PET_PARTS[k].filter((o) => !RA.petLock(o, ctx)); p[k] = ok[(Math.random() * ok.length) | 0].id; });
+      save(); render(); toast(`${p.name} has a new look`);
+    }
+    if (e.target.id === "resetLook") { RA.PET_KEYS.forEach((k) => (p[k] = RA.PET_DEFAULTS[k])); save(); render(); }
     if (e.target.id === "feed") { if (p.energy >= 100) toast(`${p.name} is full. Go clear a mission.`); else { p.energy = Math.min(100, p.energy + 5); p.bond = Math.min(100, p.bond + 1); save(); render(); toast(`${p.name} ate a commit`); } }
   };
-  $("#pname").onchange = (e) => { p.name = e.target.value.trim() || "NULL"; save(); };
+  $("#pname").onchange = (e) => { p.name = e.target.value.trim() || "NULL"; save(); render(); };
+}
+
+// Personality: generated from the pet and your real progress (RA.persona), with your overrides in S.pet.persona.
+function personaPanel(el) {
+  const ov = S.pet.persona = S.pet.persona || {}, P = RA.persona(S), slug = (S.pet.name || "pet").toLowerCase().replace(/[^a-z0-9]+/g, "-");
+  el.innerHTML = `<p class="tiny acc">PERSONALITY // ${esc(P.format)} v${P.version}</p><h2>${esc(P.archetype)}</h2><p>${esc(P.summary)}</p>
+    <div class="cols"><div>
+      <h3>Traits</h3><p class="mut tiny">Generated from how you play: bond, energy, the languages you've touched, how often you verify on a real engine, how often you use hints, and the parts you picked. Drag to override; <b>auto</b> ones follow your progress.</p>
+      ${P.traitScale.labels.map((t) => `<label class="lbl">${esc(t.label)}: <b>${P.traits[t.id]}</b> ${ov.traits && ov.traits[t.id] != null ? `<button class="tiny" data-auto="${t.id}">auto</button>` : `<span class="tiny mut">auto</span>`}<span class="tiny mut" style="float:right">${esc(t.low)} ↔ ${esc(t.high)}</span><input type="range" min="0" max="100" value="${P.traits[t.id]}" data-trait="${t.id}" aria-label="${esc(t.label)}"></label>`).join("")}
+    </div><div>
+      <h3>Voice</h3>
+      <label class="lbl">Archetype<input class="field" id="pArch" value="${esc(ov.archetype || "")}" placeholder="${esc(P.archetype)}" maxlength="40"></label>
+      <label class="lbl">Greeting<input class="field" id="pGreet" value="${esc(ov.greeting || "")}" placeholder="${esc(P.voice.greeting)}" maxlength="120"></label>
+      <label class="lbl">Pronouns<input class="field" id="pPro" value="${esc(ov.pronouns || "")}" placeholder="it/its" maxlength="20"></label>
+      <p><b>Tone:</b> ${P.voice.tone.map(esc).join(", ")}</p><p><b>Sign-off:</b> “${esc(P.voice.signoff)}”</p>
+      <p><b>Catchphrases:</b></p><ul>${P.voice.catchphrases.map((c) => `<li>${esc(c)}</li>`).join("")}</ul>
+      ${P.voice.quirks.length ? `<p><b>Quirks:</b></p><ul>${P.voice.quirks.map((q) => `<li>${esc(q)}</li>`).join("")}</ul>` : ""}
+    </div></div>
+    <div class="row" style="margin-top:12px"><button id="reroll">Reroll</button><button id="resetPersona">Reset to generated</button></div>
+    <h3 style="margin-top:16px">Take it with you</h3>
+    <p class="mut">The <b>.persona.json</b> file is an open format for assistants: personality, voice, knowledge, avatar and a ready system prompt, plus empty <code>capabilities</code>, <code>connectors</code> and <code>extensions</code> slots that future programs can fill in. The <b>card</b> is the same thing as plain Markdown for chat tools. Spec: <a href="persona.schema.json" target="_blank" rel="noopener">persona.schema.json</a>.</p>
+    <div class="row"><button class="primary" id="dlPersona">Download ${esc(slug)}.persona.json</button><button id="dlCard">Download card (.md)</button><button id="cpPrompt">Copy system prompt</button></div>
+    <details class="worked"><summary>System prompt preview</summary><pre style="white-space:pre-wrap">${esc(P.prompt.system)}</pre></details>`;
+  const commit = () => { save(); personaPanel(el); };
+  el.oninput = (e) => { const t = e.target.dataset.trait; if (t) e.target.closest("label").querySelector("b").textContent = e.target.value; };
+  el.onchange = (e) => {
+    const t = e.target.dataset.trait;
+    if (t) { ov.traits = Object.assign({}, ov.traits, { [t]: +e.target.value }); commit(); }
+    const map = { pArch: "archetype", pGreet: "greeting", pPro: "pronouns" }[e.target.id];
+    if (map) { const val = e.target.value.trim(); if (val) ov[map] = val; else delete ov[map]; commit(); }
+  };
+  el.onclick = async (e) => {
+    const a = e.target.dataset.auto; if (a) { delete ov.traits[a]; commit(); return; }
+    if (e.target.id === "reroll") { ov.seed = (ov.seed || 0) + 1; commit(); toast("New personality mix"); }
+    if (e.target.id === "resetPersona") { S.pet.persona = {}; save(); personaPanel(el); toast("Back to the generated personality"); }
+    if (e.target.id === "dlPersona") { download(`${slug}.persona.json`, new Blob([JSON.stringify(RA.persona(S), null, 2)], { type: "application/json" })); toast("Personality downloaded"); }
+    if (e.target.id === "dlCard") { download(`${slug}.persona.md`, new Blob([RA.personaCard(RA.persona(S))], { type: "text/markdown" })); toast("Card downloaded"); }
+    if (e.target.id === "cpPrompt") { try { await navigator.clipboard.writeText(RA.persona(S).prompt.system); toast("System prompt copied"); } catch (err) { toast("Couldn't copy; use the preview below"); } }
+  };
 }
 
 // ---------- backup ----------
