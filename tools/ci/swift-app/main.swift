@@ -38,7 +38,8 @@ let web = #"{"format":"rootaccess-save","version":2,"done":[],"prefs":{"scheme":
 let ws = try JSONDecoder().decode(SaveData.self, from: Data(web.utf8))
 precondition(ws.prefs.scheme == "light" && ws.prefs.scale == 120 && ws.prefs.editorSize == 15 && ws.prefs.width == "full" && ws.prefs.rain == "on", "prefs")
 precondition(ws.settings.mode == "device" && !ws.settings.offlineClears && ws.settings.autoReverify && ws.settings.packBase["python"] != nil, "engine settings")
-precondition(try JSONDecoder().decode(SaveData.self, from: try GameStore.encode(ws)) == ws, "prefs round trip")
+let wsRound = try JSONDecoder().decode(SaveData.self, from: try GameStore.encode(ws))
+precondition(wsRound == ws, "prefs round trip")
 print("prefs: ok")
 
 // On-device JavaScript (JavaScriptCore + virtual timers): solutions pass, starters fail, runaway loops stop.
