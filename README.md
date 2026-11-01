@@ -30,7 +30,7 @@ node tools/gen-swift.js   # RootAccess.swiftpm/Curriculum.swift
 node tools/gen-docs.js    # docs/LANGUAGES.md
 ```
 
-Open `RootAccess.swiftpm` in Swift Playgrounds (iPad or Mac) or Xcode 15+.
+Open `RootAccess.swiftpm` in Swift Playgrounds (iPad or Mac) or Xcode 15+. A ready-to-open zip is published with the web app: [RootAccess.swiftpm.zip](https://anewbyss.github.io/root-access/RootAccess.swiftpm.zip) (download, unzip in Files or Finder, then open the `.swiftpm` folder).
 
 ## Host the web app
 

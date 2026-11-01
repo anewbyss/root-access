@@ -2,6 +2,8 @@
 
 Open this folder in Swift Playgrounds 4.4+ (iPad or Mac) or Xcode 15+. Requires iOS/iPadOS 17.
 
+Download: [RootAccess.swiftpm.zip](https://anewbyss.github.io/root-access/RootAccess.swiftpm.zip), rebuilt from `main` by the `pages` workflow. On iPad, tap it in Files to unzip, then tap `RootAccess.swiftpm`; on a Mac, double-click the zip, then open the folder with Swift Playgrounds.
+
 - Same 156 missions (Boot Camp plus 144 language missions), step-by-step guides, hint ladder, faction briefs, dossiers and pet as the web app. `Curriculum.swift` embeds the shared JavaScript curriculum, and `Engine.swift` runs it in JavaScriptCore, so checkpoint harnesses are identical to the web app and GitHub Actions.
 - Run checkpoints: your code is composed with the mission's harness and sent to Judge0 over URLSession. JavaScript missions run on device in JavaScriptCore (same harness, 10 s time limit), so they work offline. Choose Auto, Judge0 first, or On device only, and set your own Judge0 host or token, in the Settings tab.
 - Offline: lessons, hints, structure checks and saves all work with no network. Languages the app can't run itself clear as "structure only" while offline and re-verify on Judge0 automatically when the connection returns (Settings → Offline).
