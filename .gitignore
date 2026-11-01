@@ -8,3 +8,4 @@ node_modules/
 .swiftpm/xcode/
 web/vendor/
 .ci-offline/
+web/RootAccess.swiftpm.zip

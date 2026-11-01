@@ -15,4 +15,4 @@ class Session {
     String id() { return id; }
 }
 
-enum Faction { LOGOS, SENTINEL, MERIDIAN }
+enum Faction { LOGOS, SENTINEL, MERIDIAN, LANTERN }

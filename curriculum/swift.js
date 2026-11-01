@@ -112,7 +112,7 @@ func describe(_ e: Event) -&gt; String {
     case .logout: return "logout"
     }
 }
-enum Faction: String, CaseIterable { case logos, sentinel, meridian }</pre>`,
+enum Faction: String, CaseIterable { case logos, sentinel, meridian, lantern }</pre>`,
   task: `Define <code>enum Event</code> with <code>login(user: String)</code>, <code>breach(severity: Int)</code> and <code>logout</code>, plus <code>func describe(_ e: Event) -&gt; String</code> with a <code>where</code> clause on one case. Add <code>enum Faction: String, CaseIterable</code>. Return text that mentions the user for <code>login</code> and the number for <code>breach</code> (like <code>"breach 3"</code>). Add a <code>where severity &gt;= 8</code> case that returns different words (like <code>"CRITICAL breach"</code>).`,
   starter: `// your code here\n`,
   checks: [[/enum\s+Event\s*\{/, "enum Event { ... }"], [/case\s+login\s*\(\s*user\s*:\s*String\s*\)/, "case login(user: String)"], [/case\s+\.breach\s*\(\s*let\s+\w+\s*\)\s*where/, "case .breach(let s) where s >= 8:"], [/enum\s+Faction\s*:\s*String\s*,\s*CaseIterable/, "enum Faction: String, CaseIterable"]] },

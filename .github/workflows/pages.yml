@@ -1,10 +1,11 @@
-# Publishes the web app (web/) to GitHub Pages. One-time setup: repository Settings -> Pages -> Source: GitHub Actions.
+# Publishes the web app (web/) to GitHub Pages, plus RootAccess.swiftpm.zip (the Swift Playgrounds app) next to it.
+# One-time setup: repository Settings -> Pages -> Source: GitHub Actions.
 name: pages
 
 on:
   push:
     branches: [main]
-    paths: ["web/**", ".github/workflows/pages.yml"]
+    paths: ["web/**", "RootAccess.swiftpm/**", ".github/workflows/pages.yml"]
   workflow_dispatch:
 
 permissions:
@@ -25,6 +26,8 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: actions/configure-pages@v5
+      - name: Package the Swift Playgrounds app
+        run: zip -qr -X web/RootAccess.swiftpm.zip RootAccess.swiftpm -x "*/.DS_Store" "*/.build/*" "*/.swiftpm/*"
       - uses: actions/upload-pages-artifact@v3
         with: { path: web }
       - id: deployment

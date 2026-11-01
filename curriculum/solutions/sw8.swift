@@ -13,4 +13,4 @@ func describe(_ e: Event) -> String {
     }
 }
 
-enum Faction: String, CaseIterable { case logos, sentinel, meridian }
+enum Faction: String, CaseIterable { case logos, sentinel, meridian, lantern }

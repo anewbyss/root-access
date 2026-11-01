@@ -1,6 +1,6 @@
 # ROOT//ACCESS
 
-A narrative hacking game that teaches 12 languages to fluency: Python, JavaScript, TypeScript, SQL, Bash, Go, Rust, Swift, Kotlin, Java, C# and C++. Work for one of three factions (the Church of the Emergent Logos, the Sentinel Directorate, or Free Meridian), clear missions drawn from real incidents like Heartbleed, SolarWinds, Log4Shell and the xz backdoor, and raise a code pet that evolves with your level.
+A narrative hacking game that teaches 12 languages to fluency: Python, JavaScript, TypeScript, SQL, Bash, Go, Rust, Swift, Kotlin, Java, C# and C++. Work for one of four factions (the Church of the Emergent Logos, the Sentinel Directorate, Free Meridian, or the Lantern Collective), clear missions drawn from real incidents like Heartbleed, SolarWinds, Log4Shell and the xz backdoor, and raise a code pet that evolves with your level.
 
 - **Starts from zero**: Boot Camp is 12 Python missions for people who have never written code (printing, variables, maths, text, decisions, loops, lists, functions, reading errors, a capstone). Every language's rank 1 opens with a primer on how it runs and its common gotchas.
 - **Help linked to each mission**: numbered steps, a live requirements checklist, plain-English explanations of failing checkpoints, and a 3-tier hint ladder (next move, then the answer's lines shuffled as a Parsons puzzle, then the full reference answer for that exact mission). `node tools/guide-check.js` verifies the links for all 156 missions in CI.
@@ -30,7 +30,7 @@ node tools/gen-swift.js   # RootAccess.swiftpm/Curriculum.swift
 node tools/gen-docs.js    # docs/LANGUAGES.md
 ```
 
-Open `RootAccess.swiftpm` in Swift Playgrounds (iPad or Mac) or Xcode 15+.
+Open `RootAccess.swiftpm` in Swift Playgrounds (iPad or Mac) or Xcode 15+. A ready-to-open zip is published with the web app: [RootAccess.swiftpm.zip](https://anewbyss.github.io/root-access/RootAccess.swiftpm.zip) (download, unzip in Files or Finder, then open the `.swiftpm` folder).
 
 ## Host the web app
 

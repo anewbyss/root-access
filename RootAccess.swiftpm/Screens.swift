@@ -8,7 +8,7 @@ import UniformTypeIdentifiers
     @State private var shown = 0
     @State private var restoring = false
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
-    private let msg = "Wake up.\n\nThe world runs on code you can't read. Pipelines, hospitals, elections, gods.\nIn 2021 one leaked password shut down a fuel pipeline. In 2024 one bad update grounded flights worldwide.\n\nThree factions want you. Each will teach you to read the code, and to write it. 12 languages, 12 ranks each, every checkpoint run on a real compiler. Never coded before? You start in Boot Camp.\n\nFollow the white cursor."
+    private let msg = "Wake up.\n\nThe world runs on code you can't read. Pipelines, hospitals, elections, gods, and secrets nobody was meant to read.\nIn 2021 one leaked password shut down a fuel pipeline. In 2024 one bad update grounded flights worldwide.\n\nFour factions want you. Each will teach you to read the code, and to write it. 12 languages, 12 ranks each, every checkpoint run on a real compiler. Never coded before? You start in Boot Camp.\n\nFollow the white cursor."
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
