@@ -7,7 +7,7 @@ import UniformTypeIdentifiers
     @EnvironmentObject var store: GameStore
     @State private var shown = 0
     @State private var restoring = false
-    private let msg = "Wake up.\n\nThe world runs on code you can't read. Pipelines, hospitals, elections, gods.\nIn 2021 one leaked password shut down a fuel pipeline. In 2024 one bad update grounded flights worldwide.\n\nThree factions want you. Each will teach you to read the code, and to write it. 12 languages, 12 ranks each, every checkpoint run on a real compiler.\n\nFollow the white cursor."
+    private let msg = "Wake up.\n\nThe world runs on code you can't read. Pipelines, hospitals, elections, gods.\nIn 2021 one leaked password shut down a fuel pipeline. In 2024 one bad update grounded flights worldwide.\n\nThree factions want you. Each will teach you to read the code, and to write it. 12 languages, 12 ranks each, every checkpoint run on a real compiler. Never coded before? You start in Boot Camp.\n\nFollow the white cursor."
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
@@ -42,10 +42,21 @@ import UniformTypeIdentifiers
     if let t = try? String(contentsOf: url, encoding: .utf8) { store.restore(json: t, label: "file restore") }
 }
 
+let BOOT_INTRO = """
+You don't need any coding experience. Each mission has the same parts:
+1. Training explains one idea in plain words, with a tiny example.
+2. Objective says exactly what your code must do.
+3. Step by step tells you what to type, one line at a time.
+4. The Terminal is where you type. Lines starting with # are notes for you; the computer skips them.
+5. Requirements tick green as you type the right pieces. When they're all green, tap Run external checkpoints: your code is sent to a real Python engine and tested.
+6. If a checkpoint fails, it tells you what it means. If you're stuck, the hint ladder goes from a nudge, to the answer's lines shuffled, to the full answer.
+Boot Camp uses Python because it reads closest to plain English. What you learn here carries over to every other language.
+"""
+
 // MARK: Missions
 @MainActor struct MissionBoard: View {
     @EnvironmentObject var store: GameStore
-    @State private var lang = "python"
+    @State private var lang = "basics"
     var body: some View {
         let f = store.faction!, L = CUR.langs.first(where: { $0.id == lang })!, flu = store.fluency(lang)
         ScrollView {
@@ -61,6 +72,13 @@ import UniformTypeIdentifiers
                         }
                     }
                 }
+                if lang != "basics" && store.fluency("basics") < 12 {
+                    Panel {
+                        Text("New to coding?").bold()
+                        Text("Start with Boot Camp: 12 short missions that assume no experience and teach the ideas every language shares.").font(.footnote)
+                        Button("Open Boot Camp") { lang = "basics" }
+                    }.overlay(Rectangle().stroke(store.accent))
+                }
                 Panel {
                     HStack(alignment: .top, spacing: 16) {
                         VStack(alignment: .leading, spacing: 8) {
@@ -68,7 +86,7 @@ import UniformTypeIdentifiers
                             Text(L.name).font(.title.bold())
                             if let d = CUR.dossiers[lang] { Text(d.tagline) }
                             Text(L.why).font(.footnote).foregroundStyle(Color.mut)
-                            NavigationLink("Read the \(L.name) dossier") { DossierView(lang: lang) }
+                            if CUR.dossiers[lang] != nil { NavigationLink("Read the \(L.name) dossier") { DossierView(lang: lang) } }
                             Text("Engine: \(L.engine)  ·  CI: \(L.ci)").font(.caption2).foregroundStyle(Color.mut)
                         }
                         Spacer()
@@ -140,12 +158,20 @@ struct FluencyRing: View {
     @State private var results: [CheckResult] = []
     @State private var running = false
     @State private var exporting = false
+    @State private var hint: Hint? = nil
+    @State private var pool: [Piece] = []
+    @State private var picked: [Piece] = []
+    @State private var pzMsg = ""
+    @State private var orientOpen = true
+    struct Piece: Identifiable, Hashable { let id: Int; let text: String }
     private var P: Praxis { CUR.praxis }
+    private var seen: Int { store.s.hints[m.id] ?? 0 }
+    private var canFull: Bool { seen >= 2 || (store.s.fails[m.id] ?? 0) >= P.fadeAfter || store.isDone(m) }
     private var stage: Int { store.s.primm[m.id] ?? 0 }
     private var langName: String { CUR.langs.first(where: { $0.id == m.lang })?.name ?? m.lang }
 
     var body: some View {
-        let fails = store.s.fails[m.id] ?? 0, worked = fails >= P.fadeAfter || store.isDone(m)
+        let steps = m.steps ?? [], terms = m.keyTerms ?? [], reqs = Engine.shared.structure(m, code: code)
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 Panel {
@@ -164,6 +190,20 @@ struct FluencyRing: View {
                         }
                     }
                     Text("\(P.stages[stage].name). ").bold().foregroundStyle(store.accent) + Text(P.stages[stage].what).foregroundStyle(Color.mut)
+                    if m.rank == 1, let o = CUR.orient?[m.lang] {
+                        DisclosureGroup(isExpanded: $orientOpen) {
+                            VStack(alignment: .leading, spacing: 6) {
+                                if m.lang == "basics" { Text(BOOT_INTRO).font(.callout) }
+                                Text("How it runs: ").bold() + Text(o.run)
+                                Text("What to write: ").bold() + Text(o.file)
+                                Text("Printing: ").bold() + Text(o.out)
+                                Text("Comments: ").bold() + Text(o.comment)
+                                Text("Common gotchas:").bold()
+                                ForEach(o.gotchas, id: \.self) { Text("• " + $0) }
+                            }.font(.callout).padding(.top, 4)
+                        } label: { Text(m.lang == "basics" ? "Before you start: how this works" : "First time in \(langName)? Read this").foregroundStyle(store.accent) }
+                        .padding(10).overlay(Rectangle().stroke(Color.line))
+                    }
                     Text("Training: \(m.concept)").font(.headline).padding(.top, 4)
                     ForEach(Array(m.lesson.enumerated()), id: \.offset) { _, p in
                         if p.code { CodeBlock(text: p.text) } else { Text(p.text) }
@@ -173,16 +213,25 @@ struct FluencyRing: View {
                         TextField("Write it in your own words. Saved with your backup.", text: Binding(get: { store.s.notes[m.id] ?? "" }, set: { store.s.notes[m.id] = $0; if stage < 2 { store.s.primm[m.id] = 2 } }), axis: .vertical)
                             .lineLimit(2...5).textFieldStyle(.roundedBorder)
                     }.padding(10).overlay(alignment: .leading) { Rectangle().fill(store.accent).frame(width: 2) }
+                    if !terms.isEmpty {
+                        DisclosureGroup("Key terms in this mission") {
+                            VStack(alignment: .leading, spacing: 4) {
+                                ForEach(terms, id: \.self) { t in Text(t.term + ": ").bold().foregroundStyle(store.accent) + Text(t.def) }
+                            }.font(.callout).padding(.top, 4)
+                        }.tint(store.accent)
+                    }
                     Text("Objective").font(.headline).padding(.top, 6)
                     Text(m.task)
-                    if worked {
-                        DisclosureGroup("Worked example (reference solution)") {
-                            CodeBlock(text: m.solution)
-                            Text("Read it, close it, then write yours from memory.").font(.footnote).foregroundStyle(Color.mut)
-                        }.tint(store.accent)
-                    } else {
-                        Text("Worked example unlocks after \(P.fadeAfter - fails) more failed run\(P.fadeAfter - fails == 1 ? "" : "s")").font(.footnote).foregroundStyle(Color.mut)
+                    if !steps.isEmpty {
+                        Text("Step by step").font(.headline).padding(.top, 6)
+                        ForEach(Array(steps.enumerated()), id: \.offset) { i, st in
+                            HStack(alignment: .top, spacing: 8) {
+                                Text("\(i + 1).").bold().foregroundStyle(store.accent)
+                                Text(st)
+                            }.padding(4).background(hint?.step == i ? store.accent.opacity(0.15) : .clear)
+                        }
                     }
+                    Text("Stuck? Use the hint ladder under the editor: 1 points at your next move, 2 gives you the answer's lines to put in order, 3 shows the full answer for this mission.").font(.footnote).foregroundStyle(Color.mut)
                 }
                 Panel {
                     HStack { Text("Terminal").font(.headline); Spacer(); Text(m.ciOnly == nil ? CUR.langs.first(where: { $0.id == m.lang })!.engine : "GitHub Actions").font(.caption).foregroundStyle(Color.mut) }
@@ -196,11 +245,27 @@ struct FluencyRing: View {
                             Button(running ? "Running…" : m.ciOnly == nil ? "Run external checkpoints" : "Check and queue for CI", action: run)
                                 .buttonStyle(.borderedProminent).disabled(running)
                             Button("Check structure") { output = structureLines().1 }
-                            Button("Hint") { output = [(Color.mut, "HINT // " + (Engine.shared.structure(m, code: code).first(where: { !$0.ok })?.hint ?? "Structure looks right. Run the checkpoints."))] }
                             Button("Reset") { code = m.starter }
                             if m.ciOnly != nil { Button("Export \(m.id).\(EXT[m.lang] ?? "txt")") { exporting = true } }
                         }.buttonStyle(.bordered)
                     }
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("REQUIREMENTS // update as you type").font(.caption2).foregroundStyle(Color.mut)
+                        ForEach(Array(reqs.enumerated()), id: \.offset) { _, r in
+                            Text((r.ok ? "✓ " : "○ ") + r.hint).font(.caption).foregroundStyle(r.ok ? store.accent : Color.mut)
+                        }
+                        let n = reqs.filter(\.ok).count
+                        Text("\(n)/\(reqs.count) in place" + (n == reqs.count ? ". Run the checkpoints." : "")).font(.caption2).foregroundStyle(Color.mut)
+                    }
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack {
+                            Text("HINTS").font(.caption2).foregroundStyle(Color.mut)
+                            Button("1 · Next move") { show(1) }
+                            Button("2 · Unscramble") { show(2) }.disabled(seen < 1)
+                            Button("3 · Full answer") { show(3) }.disabled(!canFull)
+                        }.buttonStyle(.bordered).font(.caption)
+                    }
+                    if let h = hint { hintPanel(h) }
                     CheckpointList(m: m, results: results, accent: store.accent)
                     VStack(alignment: .leading, spacing: 4) {
                         ForEach(Array(output.enumerated()), id: \.offset) { _, l in
@@ -220,6 +285,55 @@ struct FluencyRing: View {
         }
     }
 
+    private func show(_ t: Int) {
+        guard let h = Engine.shared.hint(m, code: code, results: results, tier: t) else { return }
+        if t > seen { store.s.hints[m.id] = t }
+        hint = h; pzMsg = ""
+        if h.kind == "parsons" { pool = (h.lines ?? []).enumerated().map { Piece(id: $0.offset, text: $0.element) }; picked = [] }
+    }
+
+    @ViewBuilder private func hintPanel(_ h: Hint) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("HINT \(h.tier)/3 // \(h.title)").font(.caption.bold()).foregroundStyle(store.accent)
+            Text(h.text).font(.callout)
+            if h.kind == "parsons" {
+                Text("Tap \(h.pieces ? "pieces" : "lines") in the order they belong. Tap a placed one to send it back.").font(.caption).foregroundStyle(Color.mut)
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(Array(picked.enumerated()), id: \.element.id) { i, p in
+                        Button { picked.remove(at: i); pool.append(p) } label: {
+                            Text("\(i + 1). " + p.text).font(.system(.caption, design: .monospaced)).frame(maxWidth: .infinity, alignment: .leading)
+                        }.buttonStyle(.bordered)
+                    }
+                    if picked.isEmpty { Text("Your answer goes here").font(.caption).foregroundStyle(Color.mut) }
+                }.padding(6).overlay(Rectangle().stroke(Color.line, style: StrokeStyle(lineWidth: 1, dash: [4])))
+                ForEach(pool) { p in
+                    Button { pool.removeAll { $0.id == p.id }; picked.append(p) } label: {
+                        Text(p.text).font(.system(.caption, design: .monospaced)).frame(maxWidth: .infinity, alignment: .leading)
+                    }.buttonStyle(.bordered)
+                }
+                HStack {
+                    Button("Check order") {
+                        let got = picked.map(\.text), ans = h.answer ?? []
+                        if got == ans { pzMsg = "Correct order. Now type it into the editor yourself, or use the button." }
+                        else if let bad = ans.indices.first(where: { $0 >= got.count || got[$0] != ans[$0] }) {
+                            pzMsg = bad >= got.count ? "So far so good: the first \(got.count) are right. Keep going." : "Not yet. The first \(bad) \(bad == 1 ? "is" : "are") right; number \(bad + 1) is out of place."
+                        }
+                    }.buttonStyle(.borderedProminent)
+                    Button("Start over") { pool += picked; picked = []; pzMsg = "" }.buttonStyle(.bordered)
+                    if picked.map(\.text) == (h.answer ?? []) && !picked.isEmpty {
+                        Button("Put it in the editor") { code = h.pieces ? Engine.shared.joinPieces(picked.map(\.text)) : picked.map(\.text).joined(separator: "\n") }.buttonStyle(.bordered)
+                    }
+                }
+                if !pzMsg.isEmpty { Text(pzMsg).font(.caption).foregroundStyle(pzMsg.hasPrefix("Not") ? Color.bad : store.accent) }
+            }
+            if h.kind == "solution", let c = h.code {
+                CodeBlock(text: c)
+                Text("Studying a worked example and then explaining it is one of the best-supported ways to learn to code. Close this, then write it yourself.").font(.footnote).foregroundStyle(Color.mut)
+                Button("Close and type it myself") { hint = nil }.buttonStyle(.bordered)
+            }
+        }.padding(10).frame(maxWidth: .infinity, alignment: .leading).overlay(Rectangle().stroke(store.accent))
+    }
+
     private func structureLines() -> (Bool, [(Color, String)]) {
         let s = Engine.shared.structure(m, code: code)
         return (s.allSatisfy(\.ok), [(Color.mut, "STRUCTURE // pattern checks, offline")] + s.map { ($0.ok ? store.accent : .bad, ($0.ok ? "[✓] " : "[✗] ") + $0.hint) })
@@ -228,7 +342,7 @@ struct FluencyRing: View {
     private func run() {
         if stage < 4 { store.s.primm[m.id] = 4 }
         let (pass, lines) = structureLines()
-        guard pass else { store.fail(m); output = lines + [(Color.bad, "Fix the red lines first. Checkpoints only run once the required pieces are present.")]; return }
+        guard pass else { store.fail(m); output = lines + [(Color.bad, "Fix the red lines first. Checkpoints only run once the required pieces are present. The Requirements list shows what's missing, and hint 1 points at the step that covers it.")]; return }
         if let ci = m.ciOnly {
             store.clear(m, how: "ci")
             output = lines + [(store.accent, "QUEUED FOR GITHUB ACTIONS. \(ci)"), (Color.mut, "Export this file (or all submissions from Backup), commit it to submissions/, and the checkpoints workflow grades it on \(CUR.langs.first(where: { $0.id == m.lang })!.ci).")]
@@ -256,8 +370,8 @@ struct FluencyRing: View {
                 } else {
                     store.fail(m)
                     if let e = rep.stderr, !e.isEmpty { out.append((Color.mut, "stderr\n" + String(e.prefix(600)))) }
-                    out.append((Color.bad, "ACCESS DENIED. Fix the failing checkpoints and run again."))
-                    if (store.s.fails[m.id] ?? 0) == P.fadeAfter { store.flash("Worked example unlocked") }
+                    out.append((Color.bad, "ACCESS DENIED. Each failing checkpoint has a plain-English explanation below the list. Fix the first one and run again."))
+                    if (store.s.fails[m.id] ?? 0) == P.fadeAfter { store.flash("Hint 3, the full answer, is now unlocked") }
                 }
                 output = out
             } catch {
@@ -288,6 +402,9 @@ struct CheckpointList: View {
                 ForEach(results, id: \.self) { r in
                     Text("\(r.status == "PASS" ? "✓" : r.status == "SKIP" ? "~" : "✗") \(r.label)").font(.caption)
                         .foregroundStyle(r.status == "PASS" ? accent : r.status == "SKIP" ? Color.mut : Color.bad)
+                    if r.status == "FAIL" {
+                        (Text("What this means: ").bold() + Text(Engine.shared.explain(m, r))).font(.caption).foregroundStyle(.white).padding(.leading, 14)
+                    }
                 }
             }
         }.frame(maxWidth: .infinity, alignment: .leading).padding(10).overlay(Rectangle().stroke(Color.line))
@@ -308,7 +425,7 @@ struct CheckpointList: View {
                 switch tab {
                 case 0:
                     ScrollView(.horizontal, showsIndicators: false) {
-                        HStack { ForEach(CUR.langs) { l in
+                        HStack { ForEach(CUR.languages) { l in
                             Button(l.name) { lang = l.id }.font(.caption).padding(.horizontal, 8).padding(.vertical, 5)
                                 .overlay(Rectangle().stroke(lang == l.id ? store.accent : Color.line)).foregroundStyle(lang == l.id ? store.accent : .white)
                         } }
@@ -407,7 +524,11 @@ struct MethodView: View {
         VStack(alignment: .leading, spacing: 12) {
             Panel {
                 Text("How you learn here").font(.title2.bold())
-                Text("Every mission follows PRIMM. Each of the 12 ranks per language is a module (\(CUR.modules.joined(separator: ", "))), so finishing rank 12 means you've used the language end to end. Worked examples unlock after \(P.fadeAfter) failed runs.")
+                Text("Every mission follows PRIMM. Each of the 12 ranks per language is a module (\(CUR.modules.joined(separator: ", "))), so finishing rank 12 means you've used the language end to end.")
+                Text("Starting from zero").font(.headline)
+                Text("Boot Camp comes first: 12 Python missions for people who have never coded, ending with a small capstone and a Read the Error mission. Every language's rank 1 opens with a primer on how it runs, prints, comments and trips people up.").font(.callout)
+                Text("Help that's linked to the mission").font(.headline)
+                Text("Every mission has numbered steps, a live requirements list, and plain-English explanations for failing checkpoints. The hint ladder goes 1: your next move (the missing requirement and its step, or the first failing checkpoint), 2: the answer's lines shuffled to put in order (a Parsons problem), 3: the full reference answer for that exact mission, which also unlocks after \(P.fadeAfter) failed runs.").font(.callout)
                 ForEach(Array(P.stages.enumerated()), id: \.offset) { i, st in Text("\(i + 1). ").bold() + Text("\(st.name): ").bold() + Text(st.what) }
             }
             Panel {

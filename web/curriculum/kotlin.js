@@ -48,7 +48,7 @@ fun String.isPrivateIp() = startsWith("10.") || startsWith("192.168.")
 val square: (Int) -&gt; Int = { it * it }
 fun retry(times: Int, op: () -&gt; Boolean): Boolean = (1..times).any { op() }
 retry(3) { Math.random() &gt; 0.5 }               // trailing lambda</pre>`,
-  task: `Write <code>fun scan(host: String, port: Int = 443)</code>, call it with a <b>named argument</b>, define the extension <code>fun String.isPrivateIp(): Boolean</code>, and write a higher-order function called with a trailing lambda.`,
+  task: `Write <code>fun scan(host: String, port: Int = 443)</code>, call it with a <b>named argument</b>, define the extension <code>fun String.isPrivateIp(): Boolean</code>, and write a higher-order function called with a trailing lambda. <code>scan</code> returns <code>"host:port"</code>. <code>isPrivateIp</code> is true for addresses that start with <code>10.</code>, <code>192.168.</code> or <code>172.16.</code>, and false for public ones like <code>8.8.8.8</code>.`,
   starter: `// your code here\n`,
   checks: [[/fun\s+scan\s*\(\s*host\s*:\s*String\s*,\s*port\s*:\s*Int\s*=\s*443/, "fun scan(host: String, port: Int = 443)"], [/scan\s*\([^)]*\w+\s*=\s*[^=]/, "named argument e.g. scan(\"core\", port = 22)"], [/fun\s+String\.isPrivateIp\s*\(\s*\)/, "fun String.isPrivateIp()"], [/\w+\s*\([^)]*\)\s*\{\s*[^}]*\}|\w+\s*\{\s*\w+\s*->/, "trailing lambda call"]] },
 
@@ -62,7 +62,7 @@ val parts = "user=neo;role=op".split(";").associate {
 }
 "  NeO ".trim().lowercase()
 "a1b2".filter { it.isDigit() }</pre><p>Null safety is part of the type system: a <code>String</code> can never be null. Avoid <code>!!</code>.</p>`,
-  task: `Write <code>fun lookup(name: String, db: Map&lt;String, String&gt;): String</code> using <code>?:</code> to return <code>"unknown"</code>, and <code>fun parseKv(s: String): Map&lt;String, String&gt;</code> using <code>split</code> and <code>associate</code>.`,
+  task: `Write <code>fun lookup(name: String, db: Map&lt;String, String&gt;): String</code> using <code>?:</code> to return <code>"unknown"</code>, and <code>fun parseKv(s: String): Map&lt;String, String&gt;</code> using <code>split</code> and <code>associate</code>. <code>parseKv("host=relay;port=22")</code> splits on <code>;</code>, then on <code>=</code>, and returns <code>mapOf("host" to "relay", "port" to "22")</code>.`,
   starter: `// your code here\n`,
   checks: [[/fun\s+lookup\s*\(\s*name\s*:\s*String\s*,\s*db\s*:\s*Map<String,\s*String>\s*\)\s*:\s*String/, "fun lookup(name: String, db: Map<String, String>): String"], [/\?:/, "Elvis ?: \"unknown\""], [/fun\s+parseKv/, "fun parseKv(s: String): Map<String, String>"], [/\.split\s*\(/, ".split(\";\")"], [/\.associate\s*\{/, ".associate { ... }"], [/^(?![\s\S]*!!)/, "no !!"]] },
 
@@ -93,7 +93,7 @@ fun parsePort(s: String): Int {
 val port = try { parsePort("x") } catch (e: BadPort) { -1 }   // try is an expression
 val r: Result&lt;Int&gt; = runCatching { parsePort("80") }
 r.onSuccess { println(it) }.onFailure { println(it.message) }</pre><p>Kotlin has no checked exceptions. Use <code>toIntOrNull</code>-style APIs for expected failures.</p>`,
-  task: `Define <code>class BadPort(...) : Exception(...)</code>, write <code>fun parsePort(s: String): Int</code> using <code>toIntOrNull()</code> and <code>require</code>, and handle errors once with try-as-expression and once with <code>runCatching</code>.`,
+  task: `Define <code>class BadPort(...) : Exception(...)</code>, write <code>fun parsePort(s: String): Int</code> using <code>toIntOrNull()</code> and <code>require</code>, and handle errors once with try-as-expression and once with <code>runCatching</code>. Valid ports are whole numbers from 1 to 65535. <code>"http"</code>, <code>"0"</code> and <code>"70000"</code> must all throw.`,
   starter: `// your code here\n`,
   checks: [[/class\s+BadPort\s*\([^)]*\)\s*:\s*(Exception|RuntimeException|IllegalArgumentException)\s*\(/, "class BadPort(raw: String) : Exception(...)"], [/toIntOrNull\(\)/, "s.toIntOrNull()"], [/require\s*\(/, "require(...)"], [/=\s*try\s*\{[\s\S]*catch/, "val x = try { ... } catch (e: BadPort) { ... }"], [/runCatching\s*\{/, "runCatching { ... }"]] },
 

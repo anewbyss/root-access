@@ -10,6 +10,7 @@ for (const k of Object.keys(RA.langs)) {
 }
 for (const k of Object.keys(RA.langs)) {
   const d = RA.DOSSIERS[k], L = RA.langs[k];
+  if (!d) continue;
   o += `\n## ${L.name}\n\n${d.tagline}\n\n`;
   o += d.stats.map((s) => `- **${s[0]}:** ${s[1]} (${S(s[2])})`).join("\n") + "\n\n";
   o += `**Relevance.** ${d.relevance} Sources: ${(d.relSrc || []).map(S).join(", ")}.\n\n`;

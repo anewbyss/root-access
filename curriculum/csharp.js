@@ -49,7 +49,7 @@ static (int up, int down) Sweep(string[] hosts)        // tuple return
     return (Up(), 0);
 }
 var (up, down) = Sweep(["a", "b"]);</pre>`,
-  task: `Write <code>static string Scan(string host, int port = 443)</code> as an expression-bodied member, call it with a <b>named</b> argument, write <code>static bool TryParsePort(string s, out int port)</code>, and return a tuple from a method.`,
+  task: `Write <code>static string Scan(string host, int port = 443)</code> as an expression-bodied member, call it with a <b>named</b> argument, write <code>static bool TryParsePort(string s, out int port)</code>, and return a tuple from a method. <code>Scan</code> returns <code>"host:port"</code>. <code>TryParsePort</code> accepts whole numbers from 1 to 65535 and returns false for anything else. The tuple method is <code>static (int Up, int Down) Count(bool[] results)</code>, so <code>Count(new[] { true, false, true })</code> returns <code>(2, 1)</code>.`,
   starter: `// your code here\n`,
   checks: [[/static\s+string\s+Scan\s*\(\s*string\s+host\s*,\s*int\s+port\s*=\s*443\s*\)\s*=>/, "static string Scan(string host, int port = 443) => ..."], [/Scan\s*\([^)]*port\s*:/, "Scan(\"core\", port: 22)"], [/static\s+bool\s+TryParsePort\s*\(\s*string\s+s\s*,\s*out\s+int\s+port\s*\)/, "static bool TryParsePort(string s, out int port)"], [/static\s+\(\s*\w+\s+\w+\s*,\s*\w+\s+\w+\s*\)\s+\w+\s*\(/, "static (int up, int down) Sweep(...)"]] },
 
@@ -82,7 +82,7 @@ public class Session(string id)                       // primary constructor (C#
     public required string Owner { get; init; }
     public void Hit() =&gt; Hits++;
 }</pre>`,
-  task: `Define <code>record Node(string Name, int Strength = 0)</code> with a computed property, use a <code>with</code> expression, and define <code>class Session</code> with a <code>{ get; private set; }</code> property and a <code>required ... { get; init; }</code> property.`,
+  task: `Define <code>record Node(string Name, int Strength = 0)</code> with a computed property, use a <code>with</code> expression, and define <code>class Session</code> with a <code>{ get; private set; }</code> property and a <code>required ... { get; init; }</code> property. <code>IsHot</code> is <code>Strength &gt; 80</code>. Make <code>Session</code>'s <code>Id</code> a <code>required string Id { get; init; }</code>.`,
   starter: `// your code here\n`,
   checks: [[/record\s+Node\s*\(\s*string\s+Name/, "record Node(string Name, int Strength = 0)"], [/\bwith\s*\{/, "a with { Strength = 90 }"], [/class\s+Session/, "class Session"], [/\{\s*get;\s*private\s+set;\s*\}/, "{ get; private set; }"], [/required\s+\w+\s+\w+\s*\{\s*get;\s*init;\s*\}/, "required string Owner { get; init; }"]] },
 
@@ -102,7 +102,7 @@ finally { Console.WriteLine("done"); }
 using var reader = new StreamReader("auth.log");      // disposed at end of scope
 string? maybe = null;                                 // nullable reference type
 int len = maybe?.Length ?? 0;</pre>`,
-  task: `Define <code>class BadPortException : Exception</code>, write <code>static int ParsePort(string s)</code> that throws it, catch it with a <code>when</code> filter plus <code>finally</code>, and add a <code>using</code> declaration and a <code>?? </code> fallback.`,
+  task: `Define <code>class BadPortException : Exception</code>, write <code>static int ParsePort(string s)</code> that throws it, catch it with a <code>when</code> filter plus <code>finally</code>, and add a <code>using</code> declaration and a <code>?? </code> fallback. Valid ports are whole numbers from 1 to 65535. <code>ParsePort</code> throws <code>BadPortException</code> for <code>"http"</code> and for <code>"70000"</code>.`,
   starter: `// your code here\n`,
   checks: [[/class\s+BadPortException[^:]*:\s*Exception/, "class BadPortException : Exception"], [/throw\s+new\s+BadPortException/, "throw new BadPortException(s)"], [/catch\s*\(\s*BadPortException\s+\w+\s*\)\s*when\s*\(/, "catch (BadPortException e) when (...)"], [/finally\s*\{/, "finally { ... }"], [/using\s+(var|[\w<>]+)\s+\w+\s*=|using\s*\(/, "using var reader = ..."], [/\?\?/, "?? fallback"]] },
 
@@ -150,7 +150,7 @@ IEnumerable&lt;object&gt; objs = new List&lt;string&gt;();          // covarianc
 var byIp = lines.GroupBy(l =&gt; l.Split(' ')[0])
                 .ToDictionary(g =&gt; g.Key, g =&gt; g.Count());
 var q = from l in lines where l.Contains("FAIL") select l.ToUpper();   // query syntax</pre><p>LINQ is lazy: nothing runs until you enumerate the results or call <code>ToList()</code>. Entity Framework translates the same LINQ into SQL.</p>`,
-  task: `Write <code>static List&lt;string&gt; FailIps(IEnumerable&lt;string&gt; lines)</code> using <code>Where</code>, <code>Select</code> and <code>ToList</code>, and <code>ByIp</code> using <code>GroupBy</code> and <code>ToDictionary</code>.`,
+  task: `Write <code>static List&lt;string&gt; FailIps(IEnumerable&lt;string&gt; lines)</code> using <code>Where</code>, <code>Select</code> and <code>ToList</code>, and <code>ByIp</code> using <code>GroupBy</code> and <code>ToDictionary</code>. Lines look like <code>"10.0.0.9 FAIL"</code>. <code>FailIps</code> returns the IP of every FAIL line in order, repeats included. <code>static Dictionary&lt;string, int&gt; ByIp(IEnumerable&lt;string&gt; lines)</code> counts every line per IP.`,
   starter: `// your code here\n`,
   checks: [[/\.Where\s*\(\s*\w+\s*=>/, ".Where(l => ...)"], [/\.Select\s*\(\s*\w+\s*=>/, ".Select(l => ...)"], [/\.ToList\s*\(\s*\)/, ".ToList()"], [/\.GroupBy\s*\(/, ".GroupBy(...)"], [/\.ToDictionary\s*\(/, ".ToDictionary(g => g.Key, g => g.Count())"]] },
 
@@ -167,7 +167,7 @@ static async Task&lt;int&gt; SweepAsync(string[] hosts, CancellationToken ct = d
 }
 using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
 int up = await SweepAsync(["a", "b"], cts.Token);</pre><p>Avoid <code>async void</code> (except for event handlers) and never block with <code>.Result</code>.</p>`,
-  task: `Write <code>static async Task&lt;bool&gt; PingAsync(string host, CancellationToken ct)</code> using <code>await Task.Delay</code>, and <code>static async Task&lt;int&gt; SweepAsync(...)</code> using <code>Task.WhenAll</code>. Create a <code>CancellationTokenSource</code>.`,
+  task: `Write <code>static async Task&lt;bool&gt; PingAsync(string host, CancellationToken ct)</code> using <code>await Task.Delay</code>, and <code>static async Task&lt;int&gt; SweepAsync(...)</code> using <code>Task.WhenAll</code>. Create a <code>CancellationTokenSource</code>. <code>PingAsync</code> returns true when the host name isn't empty. Pass <code>ct</code> to <code>Task.Delay</code> so cancelling works. <code>static async Task&lt;int&gt; SweepAsync(IEnumerable&lt;string&gt; hosts, CancellationToken ct)</code> returns how many hosts answered true.`,
   starter: `// your code here\n`,
   checks: [[/static\s+async\s+Task<bool>\s+PingAsync\s*\(/, "static async Task<bool> PingAsync(...)"], [/await\s+Task\.Delay\s*\(/, "await Task.Delay(50, ct)"], [/static\s+async\s+Task<int>\s+SweepAsync/, "static async Task<int> SweepAsync(...)"], [/Task\.WhenAll\s*\(/, "await Task.WhenAll(...)"], [/CancellationTokenSource/, "new CancellationTokenSource(...)"]] },
 
@@ -191,7 +191,7 @@ public class SentryDrone : MonoBehaviour
 
 // Tests/DroneLogicTests.cs
 public class DroneLogicTests { [Fact] public void Clamps() =&gt; Assert.Equal(10, DroneLogic.Clamp(99, 0, 10)); }</pre>`,
-  task: `Write <code>class SentryDrone : MonoBehaviour</code> with <code>[SerializeField] private</code> fields, <code>Start</code> and <code>Update</code> methods that use <code>Time.deltaTime</code>, and an <code>event</code> invoked with <code>?.Invoke</code>. Add an xUnit test class with <code>[Fact]</code> and <code>Assert.Equal</code>.`,
+  task: `Write <code>class SentryDrone : MonoBehaviour</code> with <code>[SerializeField] private</code> fields, <code>Start</code> and <code>Update</code> methods that use <code>Time.deltaTime</code>, and an <code>event</code> invoked with <code>?.Invoke</code>. Add an xUnit test class with <code>[Fact]</code> and <code>Assert.Equal</code>. Give the drone a <code>[SerializeField] private Transform target</code> and a range field. In <code>Update</code>, when <code>Vector3.Distance(transform.position, target.position)</code> is less than the range, invoke an event such as <code>public event Action&lt;float&gt; TargetSpotted</code>.`,
   starter: `using UnityEngine;\nusing Xunit;\n\n// your code here\n`,
   checks: [[/class\s+\w+\s*:\s*MonoBehaviour/, "class SentryDrone : MonoBehaviour"], [/\[SerializeField\]\s*private/, "[SerializeField] private float speed"], [/void\s+Update\s*\(\s*\)/, "void Update()"], [/Time\.deltaTime/, "speed * Time.deltaTime"], [/\bevent\s+[\w.<>?]+\s+\w+/, "public event Action<int> OnHit"], [/\?\.Invoke\s*\(/, "OnHit?.Invoke(hits)"], [/\[Fact\]/, "[Fact]"], [/Assert\.Equal\s*\(/, "Assert.Equal(...)"]] }
 ]);

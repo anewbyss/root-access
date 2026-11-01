@@ -1,7 +1,7 @@
 // Loads the curriculum into a Node vm context (files expect a browser-style global RA).
 const vm = require("vm"), fs = require("fs"), path = require("path");
 const ROOT = path.join(__dirname, "..", "curriculum");
-const ORDER = ["_core", "_world", "_dossiers", "_engine", "python", "javascript", "typescript", "sql", "bash", "go", "rust", "swift", "kotlin", "java", "csharp", "cpp"];
+const ORDER = ["_core", "_world", "_dossiers", "_engine", "basics", "python", "javascript", "typescript", "sql", "bash", "go", "rust", "swift", "kotlin", "java", "csharp", "cpp", "_steps", "_guide"];
 module.exports = function load() {
   const ctx = { console, fetch: globalThis.fetch, Buffer, setTimeout };
   ctx.globalThis = ctx; vm.createContext(ctx);

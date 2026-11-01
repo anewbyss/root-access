@@ -25,6 +25,7 @@ const q = (s) => "'" + String(s).replace(/'/g, "'\\''") + "'";
 // Each runner: write files into a temp dir, compile (-> "Compilation Error" on failure), then run.
 const RUN = {
   python: (src, d) => [null, (w(d, "main.py", src), "python3 main.py")],
+  basics: (src, d) => [null, (w(d, "main.py", src), "python3 main.py")],
   sql: (src, d) => [null, (w(d, "main.py", src), "python3 main.py")],
   javascript: (src, d) => [null, (w(d, "main.js", src), "node main.js")],
   typescript: (src, d) => { w(d, "main.ts", src); w(d, "package.json", '{"type":"module"}'); return ["tsc --strict --target es2022 --module es2022 --moduleResolution bundler --lib es2022,dom --skipLibCheck --outDir out main.ts", "node out/main.js"]; },
@@ -76,7 +77,7 @@ let bad = 0;
 for (const m of missions) {
   const user = codeFor(m);
   if (user == null) continue;
-  const harness = m.lang in { python: 1, javascript: 1, typescript: 1, sql: 1 } ? "" : RA.HARNESS[m.id] || "";
+  const harness = m.lang in { basics: 1, python: 1, javascript: 1, typescript: 1, sql: 1 } ? "" : RA.HARNESS[m.id] || "";
   const meta = RA.harnessMeta(harness);
   const src = RA.compose(m, user, "ci");
   const d = fs.mkdtempSync(path.join(os.tmpdir(), "ra-" + m.id + "-"));

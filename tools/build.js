@@ -3,7 +3,7 @@
 const fs = require("fs"), path = require("path");
 const ROOT = path.join(__dirname, "..");
 const SRC = path.join(ROOT, "curriculum"), OUT = path.join(ROOT, "web", "curriculum");
-const ORDER = ["_core", "_world", "_dossiers", "_engine", "python", "javascript", "typescript", "sql", "bash", "go", "rust", "swift", "kotlin", "java", "csharp", "cpp"];
+const ORDER = ["_core", "_world", "_dossiers", "_engine", "basics", "python", "javascript", "typescript", "sql", "bash", "go", "rust", "swift", "kotlin", "java", "csharp", "cpp", "_steps", "_guide"];
 
 fs.rmSync(OUT, { recursive: true, force: true });
 fs.mkdirSync(OUT, { recursive: true });

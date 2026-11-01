@@ -23,7 +23,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        lang: [python, javascript, typescript, sql, bash, go, rust, kotlin, java, csharp, cpp]
+        lang: [basics, python, javascript, typescript, sql, bash, go, rust, kotlin, java, csharp, cpp]
     env:
       RA_LIB: ${{ github.workspace }}/.ci-lib
       CXX: g++-14
@@ -31,7 +31,7 @@ jobs:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
         with: { node-version: 22 }
-      - if: matrix.lang == 'python' || matrix.lang == 'sql'
+      - if: matrix.lang == 'basics' || matrix.lang == 'python' || matrix.lang == 'sql'
         uses: actions/setup-python@v5
         with: { python-version: "3.13" }
       - if: matrix.lang == 'typescript'
@@ -98,6 +98,15 @@ jobs:
           name: checkpoints-swift
           path: "*-swift.json"
           if-no-files-found: ignore
+
+  guide:
+    name: beginner guide (steps, hints, answers)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with: { node-version: 22 }
+      - run: node tools/guide-check.js
 
   swift-app:
     name: swift playgrounds app

@@ -126,7 +126,7 @@ for h in hosts {
 for h in handles { h.join().unwrap(); }
 
 let (tx, rx) = mpsc::channel();</pre><p>The compiler won't let you share non-thread-safe data. For async I/O, the ecosystem uses <code>tokio</code>.</p>`,
-  task: `Write <code>fn sweep(hosts: Vec&lt;String&gt;) -&gt; usize</code> that spawns a thread per host with <code>thread::spawn(move || ...)</code>, increments a shared <code>Arc&lt;Mutex&lt;usize&gt;&gt;</code>, joins every handle and returns the final count.`,
+  task: `Write <code>fn sweep(hosts: Vec&lt;String&gt;) -&gt; usize</code> that spawns a thread per host with <code>thread::spawn(move || ...)</code>, increments a shared <code>Arc&lt;Mutex&lt;usize&gt;&gt;</code>, joins every handle and returns the final count. A host counts as reachable when its name isn't empty, so <code>sweep(vec!["a", "", "c"])</code> returns 2.`,
   starter: `use std::sync::{Arc, Mutex};\nuse std::thread;\n\n// your code here\n`,
   checks: [[/Arc::new\(\s*Mutex::new\(/, "Arc::new(Mutex::new(0))"], [/Arc::clone\(/, "Arc::clone(&counter)"], [/thread::spawn\(\s*move\s*\|\|/, "thread::spawn(move || ...)"], [/\.lock\(\)/, ".lock().unwrap()"], [/\.join\(\)/, "h.join().unwrap()"]] },
 
@@ -151,7 +151,7 @@ mod tests {
         write!(f, "{} total / {} fails", self.total, self.fails)
     }
 }</pre>`,
-  task: `Define <code>enum Status { Ok, Fail }</code>, <code>struct Record { ip: String, status: Status }</code>, <code>fn parse(line: &amp;str) -&gt; Result&lt;Record, String&gt;</code>, <code>struct Summary { total: usize, fails: usize }</code> with <code>impl std::fmt::Display for Summary</code>, <code>fn analyze(lines: &amp;[&amp;str]) -&gt; Summary</code> using <code>filter_map</code>, and a test module.`,
+  task: `Define <code>enum Status { Ok, Fail }</code>, <code>struct Record { ip: String, status: Status }</code>, <code>fn parse(line: &amp;str) -&gt; Result&lt;Record, String&gt;</code>, <code>struct Summary { total: usize, fails: usize }</code> with <code>impl std::fmt::Display for Summary</code>, <code>fn analyze(lines: &amp;[&amp;str]) -&gt; Summary</code> using <code>filter_map</code>, and a test module. <code>parse</code> accepts exactly two words, an IP and <code>OK</code> or <code>FAIL</code>, and returns <code>Err</code> for anything else. In the <code>Summary</code>, <code>total</code> counts lines that parsed and <code>fails</code> counts the <code>FAIL</code> ones, so <code>["1.1.1.1 FAIL", "2.2.2.2 OK", "junk", "3.3.3.3 FAIL"]</code> gives total 3, fails 2.`,
   starter: `// your code here\n`,
   checks: [[/enum\s+Status/, "enum Status { Ok, Fail }"], [/struct\s+Record/, "struct Record { ip, status }"], [/fn\s+parse\s*\(\s*line\s*:\s*&str\s*\)\s*->\s*Result<\s*Record\s*,\s*String\s*>/, "fn parse(line: &str) -> Result<Record, String>"], [/impl\s+(std::)?fmt::Display\s+for\s+Summary|impl\s+Display\s+for\s+Summary/, "impl std::fmt::Display for Summary"], [/filter_map/, ".filter_map(|l| parse(l).ok())"], [/#\[test\]/, "#[test]"]] }
 ]);

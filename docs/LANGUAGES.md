@@ -4,6 +4,7 @@ Generated from `curriculum/_dossiers.js` by `node tools/gen-docs.js`. The same t
 
 | Language | Judge0 engine | GitHub Actions toolchain | CI-only ranks |
 |---|---|---|---|
+| Boot Camp | Python 3.13 (Judge0) | Python 3.13 | none |
 | Python | Python 3.13 (Judge0) | Python 3.13 | none |
 | JavaScript | Node.js 22 (Judge0) | Node.js 22 | none |
 | TypeScript | tsc + Node (Judge0) | TypeScript 5.6 --strict | none |

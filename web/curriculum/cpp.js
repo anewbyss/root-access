@@ -12,7 +12,7 @@ int main() {
     std::cout &lt;&lt; "Agent " &lt;&lt; handle &lt;&lt; " // level " &lt;&lt; level &lt;&lt; '\\n';
     return 0;
 }</pre><p>Compile with <code>g++ -std=c++23 -Wall -Wextra -O2 main.cpp</code>. Always initialize variables, because reading an uninitialized local is a classic bug (C++26 finally makes it defined "erroneous behavior").</p>`,
-  task: `Write <code>std::string intro(const std::string&amp; handle, int level)</code> that returns the formatted string, and an <code>int main()</code> that uses <code>auto</code>, <code>const</code> and <code>std::cout</code>.`,
+  task: `Write <code>std::string intro(const std::string&amp; handle, int level)</code> that returns the formatted string, and an <code>int main()</code> that uses <code>auto</code>, <code>const</code> and <code>std::cout</code>. <code>intro("neo", 3)</code> must return <code>"Agent neo // level 3"</code>.`,
   starter: `#include <iostream>\n#include <string>\n\n// your code here\n`,
   checks: [[/std::string\s+intro\s*\(\s*const\s+std::string\s*&\s*handle\s*,\s*int\s+level\s*\)/, "std::string intro(const std::string& handle, int level)"], [/int\s+main\s*\(/, "int main()"], [/\bauto\s+\w+\s*=/, "auto x = ..."], [/\bconst\s+/, "const ..."], [/std::cout\s*<</, "std::cout << ..."]] },
 
@@ -33,7 +33,7 @@ const char* name(Level l) {
     }
     return "?";
 }</pre><p>Prefer <code>enum class</code>, which is scoped and doesn't implicitly convert to <code>int</code>. Turn on <code>-Wswitch</code> to catch missing cases.</p>`,
-  task: `Define <code>enum class Level</code>, write <code>Level classify(int score)</code> with <code>if</code>/<code>else</code>, and <code>const char* name(Level l)</code> using <code>switch</code> over every enumerator.`,
+  task: `Define <code>enum class Level</code>, write <code>Level classify(int score)</code> with <code>if</code>/<code>else</code>, and <code>const char* name(Level l)</code> using <code>switch</code> over every enumerator. Use the thresholds 90, 60 and 30, and have <code>name</code> return <code>"CRITICAL"</code>, <code>"HIGH"</code>, <code>"MEDIUM"</code> or <code>"LOW"</code>.`,
   starter: `// your code here\n`,
   checks: [[/enum\s+class\s+Level/, "enum class Level { ... }"], [/Level\s+classify\s*\(\s*int\s+score\s*\)/, "Level classify(int score)"], [/switch\s*\(\s*\w+\s*\)/, "switch (l) { ... }"], [/case\s+Level::\w+\s*:/, "case Level::Critical:"]] },
 
@@ -59,7 +59,7 @@ int add(int a, int b);  double add(double a, double b);   // overloads
 auto square = [](int x) { return x * x; };
 int threshold = 80;
 auto hot = [threshold](int s) { return s &gt; threshold; };  // capture by value</pre><p>Rule of thumb: pass cheap types by value, large read-only types by <code>const&amp;</code>, and anything you need to modify by <code>&amp;</code>.</p>`,
-  task: `Write <code>std::size_t count_words(const std::string&amp; text)</code>, <code>void redact(std::string&amp; msg)</code>, <code>scan</code> with a default <code>port = 443</code>, and a lambda that captures a variable.`,
+  task: `Write <code>std::size_t count_words(const std::string&amp; text)</code>, <code>void redact(std::string&amp; msg)</code>, <code>scan</code> with a default <code>port = 443</code>, and a lambda that captures a variable. <code>count_words</code> counts words separated by any whitespace (blank text is 0). <code>redact</code> replaces the text with <code>"[REDACTED]"</code>. <code>scan</code> returns <code>"host:port"</code>.`,
   starter: `#include <string>\n#include <sstream>\n\n// your code here\n`,
   checks: [[/count_words\s*\(\s*const\s+std::string\s*&\s*\w+\s*\)/, "count_words(const std::string& text)"], [/void\s+redact\s*\(\s*std::string\s*&\s*\w+\s*\)/, "void redact(std::string& msg)"], [/int\s+port\s*=\s*443/, "int port = 443"], [/\[\s*[&=]?\s*\w+\s*\]\s*\(/, "lambda with capture [threshold](int s) { ... }"]] },
 
@@ -79,7 +79,7 @@ std::string caesar(std::string_view text, int shift) {
     return out;
 }
 std::string line = std::format("{:&lt;10}|{:&gt;5}", "core", 443);   // C++20</pre><p><code>string_view</code> is a non-owning view. Never return one that points into a temporary string.</p>`,
-  task: `Write <code>std::string caesar(std::string_view text, int shift)</code> using <code>reserve</code>, <code>std::isalpha</code> and <code>% 26</code>, and <code>bool is_private(std::string_view ip)</code> using <code>starts_with</code>.`,
+  task: `Write <code>std::string caesar(std::string_view text, int shift)</code> using <code>reserve</code>, <code>std::isalpha</code> and <code>% 26</code>, and <code>bool is_private(std::string_view ip)</code> using <code>starts_with</code>. <code>is_private</code> is true for addresses starting with <code>10.</code> or <code>192.168.</code>, and false for public ones like <code>8.8.8.8</code>.`,
   starter: `#include <string>\n#include <string_view>\n#include <cctype>\n\n// your code here\n`,
   checks: [[/std::string\s+caesar\s*\(\s*std::string_view\s+\w+\s*,\s*int\s+shift\s*\)/, "std::string caesar(std::string_view text, int shift)"], [/\.reserve\s*\(/, "out.reserve(text.size())"], [/std::isalpha|isalpha/, "std::isalpha(...)"], [/%\s*26/, "% 26"], [/\.starts_with\s*\(/, "ip.starts_with(\"10.\")"]] },
 
@@ -103,7 +103,7 @@ public:
 private:
     std::FILE* f_;
 };</pre><p>RAII is the central idea in C++: acquire a resource in the constructor and release it in the destructor. Most classes then need no special members at all (the "rule of zero").</p>`,
-  task: `Write <code>class Node</code> with an <code>explicit</code> constructor that uses a member initializer list, a <code>const</code> member function, and private members. Then write an RAII class with a destructor (<code>~</code>) and a deleted copy constructor.`,
+  task: `Write <code>class Node</code> with an <code>explicit</code> constructor that uses a member initializer list, a <code>const</code> member function, and private members. Then write an RAII class with a destructor (<code>~</code>) and a deleted copy constructor. Use <code>Node(std::string name, int strength)</code> with accessors <code>name()</code> and <code>strength()</code> that are marked <code>const</code>.`,
   starter: `#include <string>\n#include <cstdio>\n\n// your code here\n`,
   checks: [[/class\s+Node/, "class Node"], [/explicit\s+Node\s*\(/, "explicit Node(...)"], [/\)\s*:\s*\w+_?\s*\(/, "member init list : name_(std::move(name))"], [/\)\s*const\s*\{/, "bool hot() const { ... }"], [/~\w+\s*\(\s*\)/, "destructor ~LogFile()"], [/=\s*delete\s*;/, "LogFile(const LogFile&) = delete;"]] },
 
@@ -118,7 +118,7 @@ std::weak_ptr&lt;Node&gt; observer = shared;                  // doesn't extend 
 
 std::optional&lt;int&gt; parse_port(std::string_view s);    // maybe a value
 // C++23: std::expected&lt;int, std::string&gt; for value-or-error</pre><p>In modern C++ you should almost never write <code>new</code> or <code>delete</code> yourself.</p>`,
-  task: `Create a <code>std::unique_ptr</code> with <code>std::make_unique</code>, move it into a vector with <code>std::move</code>, and write <code>std::optional&lt;int&gt; parse_port(std::string_view s)</code> that returns <code>std::nullopt</code> on bad input. Don't use raw <code>new</code>.`,
+  task: `Create a <code>std::unique_ptr</code> with <code>std::make_unique</code>, move it into a vector with <code>std::move</code>, and write <code>std::optional&lt;int&gt; parse_port(std::string_view s)</code> that returns <code>std::nullopt</code> on bad input. Don't use raw <code>new</code>. Valid ports are whole numbers from 1 to 65535 with nothing after them, so <code>"http"</code>, <code>"0"</code>, <code>"70000"</code> and <code>"80abc"</code> all return <code>std::nullopt</code>.`,
   starter: `#include <memory>\n#include <optional>\n#include <string_view>\n#include <vector>\n\n// your code here\n`,
   checks: [[/std::make_unique\s*</, "std::make_unique<Node>(...)"], [/std::unique_ptr\s*</, "std::unique_ptr<Node>"], [/std::move\s*\(/, "std::move(node)"], [/std::optional<int>\s+parse_port/, "std::optional<int> parse_port(std::string_view s)"], [/std::nullopt/, "return std::nullopt;"], [/^(?![\s\S]*\bnew\s+\w)/, "no raw new"]] },
 
@@ -133,7 +133,7 @@ std::optional&lt;std::vector&lt;std::byte&gt;&gt; reply(std::span&lt;const std::
     auto slice = payload.first(claimed_len);
     return std::vector&lt;std::byte&gt;(slice.begin(), slice.end());
 }</pre><p>Use <code>.at()</code> or hardened standard libraries for checked access. Build with <code>-fsanitize=address,undefined</code> while testing. The NSA and CISA recommend memory-safe languages for new code, and this lab shows why.</p>`,
-  task: `Write a safe <code>reply</code> that takes a <code>std::span&lt;const std::byte&gt;</code> and a claimed length, <b>compares it against <code>payload.size()</code></b>, and returns <code>std::nullopt</code> when the claim is larger. Use <code>.first(</code> or <code>.subspan(</code>, and don't use <code>memcpy</code>.`,
+  task: `Write a safe <code>reply</code> that takes a <code>std::span&lt;const std::byte&gt;</code> and a claimed length, <b>compares it against <code>payload.size()</code></b>, and returns <code>std::nullopt</code> when the claim is larger. Use <code>.first(</code> or <code>.subspan(</code>, and don't use <code>memcpy</code>. Name it <code>std::optional&lt;std::vector&lt;std::byte&gt;&gt; heartbeat_reply(std::span&lt;const std::byte&gt; payload, std::size_t claimed)</code>. It returns the first <code>claimed</code> bytes, or <code>std::nullopt</code> when <code>claimed &gt; payload.size()</code>.`,
   starter: `#include <span>\n#include <optional>\n#include <vector>\n#include <cstddef>\n\n// your code here\n`,
   checks: [[/std::span\s*<\s*const\s+std::byte\s*>/, "std::span<const std::byte> payload"], [/\w+\s*>\s*payload\.size\(\)|payload\.size\(\)\s*<\s*\w+/, "if (claimed_len > payload.size())"], [/std::nullopt/, "return std::nullopt;"], [/\.first\s*\(|\.subspan\s*\(/, "payload.first(claimed_len)"], [/^(?![\s\S]*memcpy)/, "no memcpy"]] },
 
@@ -187,7 +187,7 @@ int sweep(const std::vector&lt;std::string&gt;&amp; hosts) {
     return up.load();
 }
 auto f = std::async(std::launch::async, [] { return ping("core"); });</pre><p>Data races are undefined behavior. Guard shared state with <code>std::mutex</code> or use <code>std::atomic</code>, and run ThreadSanitizer.</p>`,
-  task: `Write <code>int sweep(const std::vector&lt;std::string&gt;&amp; hosts)</code> using <code>std::thread</code> or <code>std::jthread</code>, a <code>std::atomic&lt;int&gt;</code> counter, and a <code>std::mutex</code> with <code>std::lock_guard</code>. Join every thread.`,
+  task: `Write <code>int sweep(const std::vector&lt;std::string&gt;&amp; hosts)</code> using <code>std::thread</code> or <code>std::jthread</code>, a <code>std::atomic&lt;int&gt;</code> counter, and a <code>std::mutex</code> with <code>std::lock_guard</code>. Join every thread. Every host counts as reachable, so <code>sweep</code> returns the number of hosts.`,
   starter: `#include <thread>\n#include <mutex>\n#include <atomic>\n#include <vector>\n#include <string>\n#include <iostream>\n\nbool ping(const std::string&) { return true; }\n\n// your code here\n`,
   checks: [[/std::(j)?thread/, "std::jthread / std::thread"], [/std::atomic\s*<\s*int\s*>/, "std::atomic<int> up{0}"], [/std::mutex/, "std::mutex"], [/std::(lock_guard|scoped_lock|unique_lock)/, "std::lock_guard lock(mu)"], [/\.join\s*\(\s*\)|jthread|\.clear\s*\(\s*\)/, "join all threads"]] },
 

@@ -65,7 +65,10 @@
       }));
     });
   };
-  RA.brief = (m, faction) => (m.brief && m.brief[faction]) || RA.BRIEFS[m.rank - 1][faction].replace(/\{L\}/g, RA.langs[m.lang].name);
+  RA.brief = (m, faction) => (m.brief && m.brief[faction]) || RA.BRIEFS[m.rank - 1][faction].replace(/\{L\}/g, RA.langs[m.lang].briefName || RA.langs[m.lang].name);
+  // Boot Camp first, then the twelve languages. Tracks (Boot Camp) aren't counted as languages.
+  RA.LANG_ORDER = ["basics", "python", "javascript", "typescript", "sql", "bash", "go", "rust", "swift", "kotlin", "java", "csharp", "cpp"];
+  RA.isTrack = (L) => !!(RA.langs[L] && RA.langs[L].track);
 
   // Shared SQL training database.
   RA.SQL_SETUP = `

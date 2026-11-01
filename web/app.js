@@ -3,8 +3,9 @@
 const RA = window.RA;
 const $ = (s, el = document) => el.querySelector(s);
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-const LANG_ORDER = ["python", "javascript", "typescript", "sql", "bash", "go", "rust", "swift", "kotlin", "java", "csharp", "cpp"];
-const EXT = { python: "py", javascript: "js", typescript: "ts", sql: "sql", bash: "sh", go: "go", rust: "rs", swift: "swift", kotlin: "kt", java: "java", csharp: "cs", cpp: "cpp" };
+const LANG_ORDER = RA.LANG_ORDER;                       // Boot Camp first, then the 12 languages
+const LANGS12 = LANG_ORDER.filter((L) => !RA.isTrack(L)); // real languages (counted for fluency, dossiers)
+const EXT = { basics: "py", python: "py", javascript: "js", typescript: "ts", sql: "sql", bash: "sh", go: "go", rust: "rs", swift: "swift", kotlin: "kt", java: "java", csharp: "cs", cpp: "cpp" };
 const BYID = Object.fromEntries(RA.missions.map((m) => [m.id, m]));
 const LOCAL_LANGS = { javascript: 1, typescript: 1 }; // can run in the browser if Judge0 is unreachable
 
@@ -17,7 +18,7 @@ const fresh = () => ({
   format: "rootaccess-save", version: 2, faction: null, xp: 0,
   done: [],            // cleared mission ids (shared with the Swift app)
   verified: {},        // id -> "judge0" | "ci" (pending GitHub Actions) | "local" | "offline"
-  code: {}, fails: {}, primm: {}, notes: {}, legacy: {},
+  code: {}, fails: {}, primm: {}, notes: {}, hints: {}, legacy: {},
   pet: { name: "NULL", color: "matrix", eyes: "dot", crown: "none", aura: "none", energy: 70, bond: 10 },
   settings: { ce: RA.judge0Hosts.ce, extra: RA.judge0Hosts.extra, token: "", tokenHeader: "X-Auth-Token" },
   updated: Date.now()
@@ -41,7 +42,7 @@ function migrate(d) {
   return s;
 }
 let S = fresh();
-let ui = { view: "missions", lang: "python", mission: null, intel: "languages", intelLang: "python" };
+let ui = { view: "missions", lang: "basics", mission: null, intel: "languages", intelLang: "python" };
 function save() { S.updated = Date.now(); store.set(KEY, JSON.stringify(S)); hud(); }
 function snapshot(label) {
   let snaps = []; try { snaps = JSON.parse(store.get(SNAP)) || []; } catch (e) {}
@@ -55,7 +56,7 @@ const langMissions = (L) => RA.missions.filter((m) => m.lang === L).sort((a, b) 
 const isDone = (id) => S.done.includes(id);
 const unlocked = (m) => m.rank === 1 || isDone(langMissions(m.lang)[m.rank - 2].id);
 const fluency = (L) => langMissions(L).filter((m) => isDone(m.id)).length;
-const metaFor = (m) => RA.harnessMeta(m.lang in { python: 1, javascript: 1, typescript: 1, sql: 1 } ? "" : RA.HARNESS[m.id] || "");
+const metaFor = (m) => RA.harnessMeta(m.lang in { basics: 1, python: 1, javascript: 1, typescript: 1, sql: 1 } ? "" : RA.HARNESS[m.id] || "");
 function toast(msg) { const t = $("#toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove("show"), 2800); }
 function download(name, blob) {
   const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name;
@@ -83,7 +84,7 @@ const cite = (k) => { const s = src(k); return s ? `<a href="${s.url}" target="_
 // ---------- HUD / nav ----------
 function hud() {
   if (S.faction) document.documentElement.style.setProperty("--acc", F().color);
-  const langsDone = LANG_ORDER.filter((L) => fluency(L) === 12).length;
+  const langsDone = LANGS12.filter((L) => fluency(L) === 12).length;
   $("#hud").innerHTML = S.faction ? `<span>${F().short}</span><span>LVL <b>${level()}</b></span><div class="bar" title="XP to next level"><i style="width:${lvlProgress() * 100}%"></i></div><span><b>${S.xp}</b> XP</span><span title="Missions cleared"><b>${S.done.length}</b>/${RA.missions.length}</span>${langsDone ? `<span title="Languages at full fluency"><b>${langsDone}</b> fluent</span>` : ""}` : "";
   $("#nav").style.visibility = S.faction ? "visible" : "hidden";
   document.querySelectorAll("#nav button").forEach((b) => b.classList.toggle("on", b.dataset.view === ui.view));
@@ -99,7 +100,7 @@ function render() {
 // ---------- intro ----------
 function intro(v) {
   v.innerHTML = `<section class="intro"><p class="mut">// incoming transmission</p><div class="type" id="type"></div>
-  <div id="pick" hidden><h2>Choose who you work for</h2><p class="mut">Every faction teaches the same 12 languages, 12 ranks each, through a different story. You can defect later and your skills carry over.</p><div class="factions">${
+  <div id="pick" hidden><h2>Choose who you work for</h2><p class="mut">Every faction teaches the same 12 languages, 12 ranks each, through a different story. You can defect later and your skills carry over.</p><p class="mut">Never written code? Every faction starts you in <b>Boot Camp</b>, 12 missions that assume no experience.</p><div class="factions">${
     Object.entries(RA.FACTIONS).map(([k, f]) => `<button class="fcard panel" data-f="${k}" style="--acc:${f.color}"><span class="tag acc">${f.short}</span><h3>${esc(f.name)}</h3><q>“${esc(f.creed)}”</q><span class="mut">${esc(f.pitch)}</span><span class="mut">Handler: ${esc(f.handler)}</span></button>`).join("")
   }</div><p class="mut" style="margin-top:16px">Already have a save? <button data-restore>Restore a backup</button></p></div></section>`;
   const msg = "Wake up.\n\nThe world runs on code you can't read. Pipelines, hospitals, elections, gods.\nIn 2021 one leaked password shut down a fuel pipeline. In 2024 one bad update crashed 8.5 million machines.\n\nThree factions want you. Each will teach you to read the code, and to write it.\nEvery mission ends at a checkpoint graded by a real compiler.\n\nFollow the white cursor.";
@@ -119,9 +120,9 @@ function missions(v) {
   const L = ui.lang, lang = RA.langs[L], list = langMissions(L), n = fluency(L), D = RA.DOSSIERS[L];
   v.innerHTML = `<div class="grid"><aside class="panel"><h3>Languages</h3><div class="langs">${LANG_ORDER.map((k) => {
     const d = fluency(k);
-    return `<button data-lang="${k}" class="${k === L ? "on" : ""}"><span>${esc(RA.langs[k].name)}</span><span class="mini"><i style="width:${(d / 12) * 100}%"></i></span><span class="mut">${d}/12</span></button>`; }).join("")}</div></aside>
-  <section><div class="panel lhead"><div><p class="mut">${esc(F().handler)} // ${esc(F().name)}</p><h2>${esc(lang.name)}</h2><p>${esc(D ? D.tagline : lang.why)}</p><p class="mut">${esc(lang.why)}</p>
-    <div class="row"><button data-intel="${L}">Read the ${esc(lang.name)} dossier</button><span class="chip">Engine: ${esc(RA.ENGINES[L].label)}</span><span class="chip">CI: ${esc(RA.CI_TOOLCHAINS[L])}</span></div></div>
+    return `${k === "basics" ? '<p class="tiny acc">START HERE</p>' : k === LANGS12[0] ? '<p class="tiny mut" style="margin-top:10px">LANGUAGES</p>' : ""}<button data-lang="${k}" class="${k === L ? "on" : ""}"><span>${esc(RA.langs[k].name)}</span><span class="mini"><i style="width:${(d / 12) * 100}%"></i></span><span class="mut">${d}/12</span></button>`; }).join("")}</div></aside>
+  <section>${L !== "basics" && fluency("basics") < 12 ? `<div class="panel banner"><b>New to coding?</b> Start with <b>Boot Camp</b>: 12 short missions that assume no experience and teach the core ideas every language shares. <button data-lang="basics">Open Boot Camp</button></div>` : ""}<div class="panel lhead"><div><p class="mut">${esc(F().handler)} // ${esc(F().name)}</p><h2>${esc(lang.name)}</h2><p>${esc(D ? D.tagline : lang.why)}</p><p class="mut">${esc(lang.why)}</p>
+    <div class="row">${D ? `<button data-intel="${L}">Read the ${esc(lang.name)} dossier</button>` : ""}<span class="chip">Engine: ${esc(RA.ENGINES[L].label)}</span><span class="chip">CI: ${esc(RA.CI_TOOLCHAINS[L])}</span></div></div>
     <div class="fluency" aria-label="Fluency ${n} of 12"><svg viewBox="0 0 120 120"><circle cx="60" cy="60" r="50" class="trk"/><circle cx="60" cy="60" r="50" class="val" style="stroke-dasharray:${(n / 12) * 314} 314"/></svg><div><b>${n}</b>/12</div><span class="mut">fluency</span></div></div>
   ${n === 12 ? certificate(L) : ""}
   <div class="mlist">${list.map((m) => { const ok = unlocked(m), dn = isDone(m.id), meta = metaFor(m), ver = S.verified[m.id];
@@ -148,25 +149,36 @@ function downloadCert(L) {
 }
 
 // ---------- mission ----------
+const BOOT_INTRO = `<p>You don't need any coding experience. Each mission has the same parts:</p><ol class="steps"><li><b>Training</b> explains one idea in plain words, with a tiny example.</li><li><b>Objective</b> says exactly what your code must do.</li><li><b>Step by step</b> tells you what to type, one line at a time.</li><li>The <b>Terminal</b> on the right is where you type. Lines starting with <code>#</code> are notes for you; the computer skips them.</li><li><b>Requirements</b> tick green as you type the right pieces. When they're all green, press <b>Run external checkpoints</b>: your code is sent to a real Python engine and tested.</li><li>If a checkpoint fails, it tells you what it means. If you're stuck, the <b>hint ladder</b> goes from a nudge, to the answer's lines shuffled, to the full answer.</li></ol><p class="mut">Boot Camp uses Python because it reads closest to plain English. Everything you learn here (variables, decisions, loops, lists, functions, reading errors) carries over to every other language.</p>`;
 function missionView(v, m) {
   if (!m) { ui.mission = null; return missions(v); }
   const code = S.code[m.id] ?? m.starter, meta = metaFor(m), P = RA.PRAXIS, stage = S.primm[m.id] || 0;
   const fails = S.fails[m.id] || 0, worked = fails >= P.fadeAfter || isDone(m.id);
   const prompt = P.selfExplain[(m.rank - 1) % P.selfExplain.length];
   const list = langMissions(m.lang), next = list[m.rank];
+  const steps = RA.stepsFor(m), terms = RA.keyTerms(m, 6), sol = RA.SOLUTIONS[m.id] || "";
+  let lastRep = null, pz = null;
+  const seen = () => S.hints[m.id] || 0;
+  const canFull = () => seen() >= 2 || (S.fails[m.id] || 0) >= P.fadeAfter || isDone(m.id);
   v.innerHTML = `<div class="row"><button id="back">← ${esc(RA.langs[m.lang].name)} board</button>${next && isDone(m.id) ? `<button data-go="${next.id}">Next: rank ${next.rank} →</button>` : ""}</div>
   <div class="panel mhead"><p class="mut">${esc(RA.langs[m.lang].name.toUpperCase())} // RANK ${m.rank} OF 12 // ${esc(m.module)}</p><h1>${esc(m.title)}</h1><p><b class="acc">${esc(F().handler)}:</b> ${esc(RA.brief(m, S.faction))}</p></div>
   <div class="cols"><div class="panel lesson">
     <ol class="primm" aria-label="PRIMM stages">${P.stages.map((s, i) => `<li><button data-stage="${i}" class="${i === stage ? "on" : i < stage ? "past" : ""}">${s.name}</button></li>`).join("")}</ol>
     <p class="stagehint"><b class="acc">${P.stages[stage].name}.</b> ${esc(P.stages[stage].what)}</p>
+    ${m.rank === 1 && RA.ORIENT[m.lang] ? `<details class="orientbox" open><summary>${m.lang === "basics" ? "Before you start: how this works" : `First time in ${esc(RA.langs[m.lang].name)}? Read this`}</summary>${m.lang === "basics" ? BOOT_INTRO : ""}${RA.orientHTML(m.lang)}</details>` : ""}
     <h3>Training: ${esc(m.concept)}</h3>${m.lesson}
     <div class="explain"><label for="note"><b>Self-explain:</b> ${esc(prompt)}</label><textarea id="note" rows="3" placeholder="Write it in your own words. Saved with your backup.">${esc(S.notes[m.id] || "")}</textarea></div>
+    ${terms.length ? `<details class="terms" ${m.lang === "basics" ? "open" : ""}><summary>Key terms in this mission</summary><dl>${terms.map((t) => `<dt>${esc(t.term)}</dt><dd>${esc(t.def)}</dd>`).join("")}</dl></details>` : ""}
     <h3>Objective</h3><p>${m.task}</p>
-    <details class="worked" ${worked ? "" : "data-locked"}><summary>${worked ? "Worked example (reference solution)" : `Worked example unlocks after ${P.fadeAfter - fails} more failed run${P.fadeAfter - fails === 1 ? "" : "s"}`}</summary>${worked ? `<pre>${esc(RA.SOLUTIONS[m.id] || "")}</pre><p class="mut">Read it, close it, then write yours from memory. Studying a worked example and then explaining it is one of the best-supported ways to learn to code (${cite("worked")}).</p>` : ""}</details>
+    ${steps.length ? `<h3>Step by step</h3><ol class="steps" id="steps">${steps.map((x, i) => `<li data-step="${i}">${x}</li>`).join("")}</ol>` : ""}
+    <p class="mut tiny">Stuck? Use the hint ladder under the editor: <b>1</b> points at your next move, <b>2</b> gives you the answer's lines to put in order, <b>3</b> shows the full answer for this mission.</p>
   </div>
   <div class="panel"><div class="row between"><h3>Terminal</h3><span class="mut tiny">Ctrl/Cmd+Enter runs checkpoints</span></div>
     <textarea class="editor" id="ed" spellcheck="false" autocapitalize="off" aria-label="Code editor">${esc(code)}</textarea>
-    <div class="row" style="margin:10px 0"><button class="primary" id="run">${meta.ciOnly ? "Check and queue for GitHub Actions" : "Run external checkpoints"}</button><button id="struct">Check structure</button><button id="hint">Hint</button><button id="reset">Reset</button>${meta.ciOnly ? `<button id="export1">Export ${m.id}.${EXT[m.lang]}</button>` : ""}</div>
+    <div class="row" style="margin:10px 0"><button class="primary" id="run">${meta.ciOnly ? "Check and queue for GitHub Actions" : "Run external checkpoints"}</button><button id="struct">Check structure</button><button id="reset">Reset</button>${meta.ciOnly ? `<button id="export1">Export ${m.id}.${EXT[m.lang]}</button>` : ""}</div>
+    <div class="req"><p class="tiny mut">REQUIREMENTS // update as you type</p><ul id="req"></ul></div>
+    <div class="hintbar row"><span class="tiny mut">HINTS</span><button data-tier="1">1 · Next move</button><button data-tier="2">2 · Unscramble the answer</button><button data-tier="3">3 · Full answer</button></div>
+    <div class="hintbox" id="hintbox" hidden></div>
     <div class="cplist" id="cps">${checkpointList(m, meta)}</div>
     <div class="term" id="out"><span class="mut">&gt; awaiting input_</span></div></div></div>`;
   const ed = $("#ed"), out = $("#out");
@@ -174,11 +186,52 @@ function missionView(v, m) {
     if (e.key === "Tab") { e.preventDefault(); const s = ed.selectionStart; ed.setRangeText("    ", s, ed.selectionEnd, "end"); }
     if ((e.metaKey || e.ctrlKey) && e.key === "Enter") $("#run").click();
   });
-  ed.addEventListener("input", () => { S.code[m.id] = ed.value; save(); });
+  const reqs = () => {
+    const r = RA.requirements(m, ed.value), done = r.filter((x) => x.ok).length;
+    $("#req").innerHTML = r.map((x) => `<li class="${x.ok ? "ok" : ""}">${x.ok ? "✓" : "○"} ${esc(x.hint)}</li>`).join("") + `<li class="tiny mut">${done}/${r.length} in place${done === r.length ? ". Run the checkpoints." : ""}</li>`;
+  };
+  const tierBtns = () => v.querySelectorAll("[data-tier]").forEach((b) => {
+    const t = +b.dataset.tier, lock = (t === 2 && seen() < 1) || (t === 3 && !canFull());
+    b.disabled = lock; b.classList.toggle("on", seen() >= t);
+    b.title = lock ? (t === 2 ? "Try hint 1 first" : `Unlocks after hint 2, or after ${P.fadeAfter} failed runs`) : "";
+  });
+  const showHint = (t) => {
+    const h = RA.hint(m, ed.value, lastRep, t, sol), box = $("#hintbox");
+    if (t > seen()) { S.hints[m.id] = t; save(); }
+    box.hidden = false;
+    v.querySelectorAll("#steps li").forEach((li) => li.classList.toggle("on", h.step != null && +li.dataset.step === h.step));
+    let body = `<p class="tiny acc">HINT ${t}/3 // ${esc(h.title)}</p><p>${h.html}</p>`;
+    if (h.kind === "parsons") {
+      pz = { pool: h.lines.map((x, i) => ({ x, i })), picked: [], answer: h.answer, pieces: h.pieces };
+      body += `<div class="pz"><p class="tiny mut">Tap ${h.pieces ? "pieces" : "lines"} in the order they belong. Tap a placed one to send it back.</p><ol class="pzans" id="pzans"></ol><div class="pzpool" id="pzpool"></div><div class="row"><button id="pzcheck" class="primary">Check order</button><button id="pzclear">Start over</button></div><p id="pzmsg"></p></div>`;
+    }
+    if (h.kind === "solution") body += `<pre>${esc(h.code)}</pre><p class="mut">Studying a worked example and then explaining it is one of the best-supported ways to learn to code (${cite("worked")}). Close this, then write it yourself.</p><div class="row"><button id="hidehint">Close and type it myself</button></div>`;
+    box.innerHTML = body; tierBtns();
+    if (h.kind === "parsons") drawPz();
+    if ($("#hidehint")) $("#hidehint").onclick = () => { box.hidden = true; ed.focus(); };
+  };
+  function drawPz() {
+    const row = (o) => `<button class="pzl ${pz.pieces ? "pc" : ""}" data-pi="${o.i}">${esc(o.x)}</button>`;
+    $("#pzans").innerHTML = pz.picked.map((o) => `<li>${row(o)}</li>`).join("");
+    $("#pzpool").innerHTML = pz.pool.map(row).join("") || '<span class="tiny mut">All placed. Check the order.</span>';
+    $("#pzpool").onclick = (e) => { const b = e.target.closest("[data-pi]"); if (!b) return; const k = pz.pool.findIndex((o) => o.i === +b.dataset.pi); pz.picked.push(pz.pool.splice(k, 1)[0]); drawPz(); };
+    $("#pzans").onclick = (e) => { const b = e.target.closest("[data-pi]"); if (!b) return; const k = pz.picked.findIndex((o) => o.i === +b.dataset.pi); pz.pool.push(pz.picked.splice(k, 1)[0]); drawPz(); };
+    $("#pzclear").onclick = () => { pz.pool = pz.pool.concat(pz.picked); pz.picked = []; drawPz(); $("#pzmsg").textContent = ""; };
+    $("#pzcheck").onclick = () => {
+      const got = pz.picked.map((o) => o.x), bad = pz.answer.findIndex((x, i) => got[i] !== x), msg = $("#pzmsg");
+      if (got.length === pz.answer.length && bad < 0) {
+        msg.innerHTML = `<span class="ok">Correct order.</span> Now type it into the editor yourself${pz.pieces ? " (as one line)" : ", keeping the indentation"}. Or <button id="pzuse">put it in the editor</button>`;
+        $("#pzuse").onclick = () => { ed.value = pz.pieces ? RA.joinPieces(got) : got.join("\n"); S.code[m.id] = ed.value; save(); reqs(); toast("Placed in the editor. Run the checkpoints."); };
+      } else if (bad >= got.length) msg.innerHTML = `<span class="mut">So far so good: the first ${got.length} are right. Keep going.</span>`;
+      else msg.innerHTML = `<span class="bad">Not yet.</span> The first ${bad} ${bad === 1 ? "is" : "are"} right; number ${bad + 1} is out of place.`;
+    };
+  }
+  v.querySelectorAll("[data-tier]").forEach((b) => (b.onclick = () => showHint(+b.dataset.tier)));
+  reqs(); tierBtns();
+  ed.addEventListener("input", () => { S.code[m.id] = ed.value; save(); reqs(); });
   $("#note").addEventListener("input", (e) => { S.notes[m.id] = e.target.value; save(); });
   $("#back").onclick = () => { ui.mission = null; render(); };
-  $("#reset").onclick = () => { ed.value = m.starter; S.code[m.id] = m.starter; save(); out.innerHTML = '<span class="mut">&gt; reset to starter code</span>'; };
-  $("#hint").onclick = () => { const f = m.checks.find((c) => !c.re.test(ed.value)); out.innerHTML = `<span class="acc">HINT // </span>${esc(f ? f.hint : "Structure looks right. Run the checkpoints.")}`; };
+  $("#reset").onclick = () => { ed.value = m.starter; S.code[m.id] = m.starter; save(); reqs(); out.innerHTML = '<span class="mut">&gt; reset to starter code</span>'; };
   if ($("#export1")) $("#export1").onclick = () => { download(`${m.id}.${EXT[m.lang]}`, new Blob([ed.value], { type: "text/plain" })); toast(`Commit it to submissions/ in your repo`); };
   v.querySelectorAll("[data-stage]").forEach((b) => (b.onclick = () => { S.primm[m.id] = +b.dataset.stage; save(); missionView(v, m); }));
   const go = v.querySelector("[data-go]"); if (go) go.onclick = () => { ui.mission = go.dataset.go; render(); };
@@ -199,7 +252,7 @@ function missionView(v, m) {
   $("#run").onclick = async () => {
     const btn = $("#run"), s = structure(), code = ed.value;
     advance(4);
-    if (!s.pass) { fail(); out.innerHTML = `<span class="mut">STRUCTURE</span>\n${s.lines.join("\n")}\n\n<span class="bad">Fix the red lines first.</span> Checkpoints only run once the required pieces are present.`; return; }
+    if (!s.pass) { fail(); out.innerHTML = `<span class="mut">STRUCTURE</span>\n${s.lines.join("\n")}\n\n<span class="bad">Fix the red lines first.</span> Checkpoints only run once the required pieces are present. The Requirements list shows what's missing, and hint 1 points at the step that covers it.`; return; }
     if (meta.ciOnly) {
       out.innerHTML = `<span class="mut">STRUCTURE</span>\n${s.lines.join("\n")}\n\n<span class="acc">QUEUED FOR GITHUB ACTIONS.</span> ${esc(meta.ciOnly)}\nExport this file (or all submissions from Backup), commit it to <code>submissions/</code>, and the checkpoints workflow grades it on ${esc(RA.CI_TOOLCHAINS[m.lang])}.`;
       clear("ci"); return;
@@ -213,16 +266,18 @@ function missionView(v, m) {
       if (!rep) { btn.disabled = false; btn.textContent = "Run external checkpoints"; out.innerHTML = `<span class="bad">Couldn't reach Judge0</span> (${esc(err.message)}). The public instance is rate-limited. Wait a minute, or add your own Judge0 host or API key under Engines.\n\n<span class="mut">Structure checks passed, so you can export this file and verify it in GitHub Actions instead.</span>`; return; }
     }
     btn.disabled = false; btn.textContent = "Run external checkpoints";
+    lastRep = rep;
     $("#cps").innerHTML = checkpointList(m, meta, rep.results);
     const ok = RA.allPassed(rep);
     const lines = rep.results.map((r) => `<span class="${r.status === "PASS" ? "ok" : r.status === "SKIP" ? "mut" : "bad"}">${r.status === "PASS" ? "[✓]" : r.status === "SKIP" ? "[~]" : "[✗]"}</span> ${esc(r.label)}${r.status !== "PASS" && r.detail ? ` <span class="mut">— ${esc(r.detail)}</span>` : ""}`);
     const user = (rep.stdout || "").split("\n").filter((l) => l && !/::cp::/.test(l)).slice(0, 12).join("\n");
     out.innerHTML = `<span class="mut">${how === "local" ? "IN-BROWSER FALLBACK (Judge0 unreachable)" : "ENGINE // " + esc(rep.engine || RA.ENGINES[m.lang].label)}${rep.time ? " · " + rep.time + "s" : ""}</span>\n${lines.join("\n")}${user ? `\n\n<span class="mut">stdout</span>\n${esc(user)}` : ""}${rep.stderr && !ok ? `\n\n<span class="mut">stderr</span>\n${esc(rep.stderr.slice(0, 600))}` : ""}`;
-    if (ok) clear(how); else { fail(); out.insertAdjacentHTML("beforeend", `\n\n<span class="bad">ACCESS DENIED.</span> Fix the failing checkpoints and run again.`); }
+    if (ok) clear(how); else { fail(); out.insertAdjacentHTML("beforeend", `\n\n<span class="bad">ACCESS DENIED.</span> Each failing checkpoint above has a plain-English explanation. Fix the first one and run again.`); }
   };
   function fail() {
     S.fails[m.id] = (S.fails[m.id] || 0) + 1; save();
-    if (S.fails[m.id] === P.fadeAfter) { toast("Worked example unlocked"); const d = $(".worked"); d.removeAttribute("data-locked"); d.innerHTML = `<summary>Worked example (reference solution)</summary><pre>${esc(RA.SOLUTIONS[m.id] || "")}</pre><p class="mut">Read it, close it, then write yours from memory.</p>`; d.open = true; }
+    if (S.fails[m.id] === P.fadeAfter) toast("Hint 3, the full answer, is now unlocked");
+    tierBtns();
   }
   function clear(how) {
     const first = !isDone(m.id), rankBefore = level();
@@ -245,7 +300,7 @@ function checkpointList(m, meta, results) {
   const where = meta.ciOnly ? `<b>GitHub Actions</b> · ${esc(RA.CI_TOOLCHAINS[m.lang])}` : `<b>Judge0</b> · ${esc(RA.ENGINES[m.lang].label)} <span class="mut">(also re-run in GitHub Actions on ${esc(RA.CI_TOOLCHAINS[m.lang])})</span>`;
   if (!labels.length) return `<p class="tiny">${where}</p><p class="mut tiny">Checkpoints are the mission's test cases. They appear after the first run.</p>`;
   const st = (l) => (results ? results.find((r) => r.label === l).status : "");
-  return `<p class="tiny">${where}</p><ul>${labels.filter((l, i, a) => a.indexOf(l) === i).filter((l) => !(l === "Compiles" && ["python", "javascript", "sql", "bash"].includes(m.lang))).map((l) => `<li class="${st(l) === "PASS" ? "ok" : st(l) === "FAIL" ? "bad" : ""}">${st(l) === "PASS" ? "✓" : st(l) === "FAIL" ? "✗" : "○"} ${esc(l)}</li>`).join("")}</ul>${meta.ciOnly ? `<p class="mut tiny">${esc(meta.ciOnly)}</p>` : ""}`;
+  return `<p class="tiny">${where}</p><ul>${labels.filter((l, i, a) => a.indexOf(l) === i).filter((l) => !(l === "Compiles" && ["basics", "python", "javascript", "sql", "bash"].includes(m.lang))).map((l) => `<li class="${st(l) === "PASS" ? "ok" : st(l) === "FAIL" ? "bad" : ""}">${st(l) === "PASS" ? "✓" : st(l) === "FAIL" ? "✗" : "○"} ${esc(l)}${st(l) === "FAIL" ? `<div class="why"><b>What this means:</b> ${RA.explain(m, results.find((r) => r.label === l))}</div>` : ""}</li>`).join("")}</ul>${meta.ciOnly ? `<p class="mut tiny">${esc(meta.ciOnly)}</p>` : ""}`;
 }
 function judgeCfg() {
   const st = S.settings, headers = {};
@@ -274,8 +329,8 @@ function intel(v) {
   const tabs = [["languages", "Language dossiers"], ["method", "How you learn here"], ["engines", "Test engines"], ["incidents", "Incident archive"]];
   let body = "";
   if (ui.intel === "languages") {
-    const L = ui.intelLang, D = RA.DOSSIERS[L], lang = RA.langs[L];
-    body = `<div class="row langtabs">${LANG_ORDER.map((k) => `<button data-il="${k}" class="${k === L ? "on" : ""}">${esc(RA.langs[k].name)}</button>`).join("")}</div>
+    const L = RA.DOSSIERS[ui.intelLang] ? ui.intelLang : "python", D = RA.DOSSIERS[L], lang = RA.langs[L];
+    body = `<div class="row langtabs">${LANGS12.map((k) => `<button data-il="${k}" class="${k === L ? "on" : ""}">${esc(RA.langs[k].name)}</button>`).join("")}</div>
     <div class="dossier"><div class="panel"><p class="tiny acc">DOSSIER // ${esc(lang.tag)}</p><h2>${esc(lang.name)}</h2><p class="lead">${esc(D.tagline)}</p>
       <div class="stats">${D.stats.map(([k, val, s]) => `<div><b>${esc(val)}</b><span>${esc(k)}</span><a class="tiny" href="${src(s)?.url}" target="_blank" rel="noopener">${esc(src(s)?.label || "")}</a></div>`).join("")}</div>
       <h3>Relevance</h3><p>${esc(D.relevance)}</p><p class="tiny mut">Sources: ${D.relSrc.map(cite).join(" · ")}</p></div>
@@ -287,7 +342,9 @@ function intel(v) {
     const P = RA.PRAXIS;
     body = `<div class="panel"><h2>The teaching method</h2><p>Every mission follows <b>PRIMM</b>: Predict, Run, Investigate, Modify, Make. You read and predict code before you write it, explain it in your own words, then build your own version that has to pass checkpoints on a real compiler.</p>
       <ol class="stages">${P.stages.map((s) => `<li><b>${s.name}</b> <span class="mut">${esc(s.what)}</span></li>`).join("")}</ol>
-      <p>Each of the 12 ranks per language is a module (${RA.MODULES.map(esc).join(", ")}), so finishing rank 12 means you've used the language end to end: syntax, data modeling, errors, the standard library, generics, concurrency, testing and a capstone. Worked examples unlock after ${P.fadeAfter} failed runs, then fade away again on the next rank.</p></div>
+      <p>Each of the 12 ranks per language is a module (${RA.MODULES.map(esc).join(", ")}), so finishing rank 12 means you've used the language end to end: syntax, data modeling, errors, the standard library, generics, concurrency, testing and a capstone. </p>
+      <h3>Starting from zero</h3><p><b>Boot Camp</b> comes first: 12 Python missions for people who have never coded, from printing one line to a small capstone, with a "Read the Error" mission that teaches you to fix broken code. Every language's rank 1 opens with a primer on how that language runs, prints, comments and trips people up.</p>
+      <h3>Help that's linked to the mission</h3><ul><li><b>Step by step:</b> every mission lists numbered steps that match its objective.</li><li><b>Requirements</b> tick green as you type, so you know what's still missing before you run anything.</li><li><b>Explained checkpoints:</b> when a test fails, you see what it got, what it wanted and what that usually means.</li><li><b>Hint ladder:</b> 1 points at your next move (the missing requirement and the step that covers it, or the first failing checkpoint), 2 gives you the lines of the answer shuffled to put in order (a Parsons problem, ${cite("parsons")}), 3 shows the full reference answer for that exact mission. The full answer also unlocks after ${P.fadeAfter} failed runs.</li></ul></div>
       <div class="panel"><h3>Why it's built this way</h3><ul>${P.evidence.map((e) => `<li>${esc(e.claim)} <span class="tiny">(${cite(e.src)})</span></li>`).join("")}</ul></div>`;
   } else if (ui.intel === "engines") {
     const rows = LANG_ORDER.map((L) => { const ms = langMissions(L), ci = ms.filter((m) => metaFor(m).ciOnly).map((m) => m.rank);
@@ -339,14 +396,14 @@ function petSVG(p) {
 }
 function pet(v) {
   const p = S.pet, lv = level(), st = stage(), next = RA.PET_STAGES.find((s) => s.lvl > lv);
-  const fluent = LANG_ORDER.filter((L) => fluency(L) === 12);
+  const fluent = LANGS12.filter((L) => fluency(L) === 12);
   const opts = (key, label) => `<h3>${label}</h3><div class="opts">${RA.PET_PARTS[key].map((o) => { const lock = lv < o.lvl;
     return `<button data-k="${key}" data-v="${o.id}" class="${p[key] === o.id ? "on" : ""}" ${lock ? "disabled" : ""}>${o.label}${lock ? ` <span class="lock">LVL ${o.lvl}</span>` : ""}</button>`; }).join("")}</div>`;
   v.innerHTML = `<div class="pet"><div class="panel"><div class="petstage">${petSVG(p)}</div>
     <div class="row" style="margin-top:12px"><input id="pname" value="${esc(p.name)}" maxlength="16" aria-label="Pet name" class="field" style="flex:1"><button id="feed">Feed a commit</button></div>
     <div class="stat"><span>Energy</span><div class="bar"><i style="width:${p.energy}%"></i></div></div>
     <div class="stat"><span>Bond</span><div class="bar"><i style="width:${p.bond}%"></i></div></div>
-    <h3 style="margin-top:14px">Languages it speaks</h3><div class="glyphs">${LANG_ORDER.map((L) => `<span class="chip ${fluency(L) === 12 ? "ok" : ""}" title="${RA.langs[L].name}: ${fluency(L)}/12">${RA.langs[L].tag} ${fluency(L)}</span>`).join("")}</div></div>
+    <h3 style="margin-top:14px">Languages it speaks</h3><div class="glyphs">${LANGS12.map((L) => `<span class="chip ${fluency(L) === 12 ? "ok" : ""}" title="${RA.langs[L].name}: ${fluency(L)}/12">${RA.langs[L].tag} ${fluency(L)}</span>`).join("")}</div></div>
   <div class="panel"><p class="mut">FORM ${RA.PET_STAGES.indexOf(st) + 1}/${RA.PET_STAGES.length}</p><h2>${st.name}</h2><p>${st.desc}</p>
     <p class="mut">${next ? `Next evolution: <b class="acc">${next.name}</b> at level ${next.lvl}. Your pet only grows as far as your skills do: parts unlock with your level, and each language you take to fluency adds a glyph.` : "Final form reached. It knows what you know."}</p>
     <p class="mut">Cleared ${S.done.length}/${RA.missions.length} · Fluent in ${fluent.length}/12</p>

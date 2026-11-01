@@ -12,8 +12,16 @@ struct Mission: Decodable, Identifiable, Hashable {
     let ciOnly: String?
     let checkpoints: [String]
     let solution: String
+    let steps: [String]?
+    let keyTerms: [KeyTerm]?
 }
-struct Lang: Decodable, Identifiable, Hashable { let id, name, tag, why, engine, ci: String }
+struct KeyTerm: Decodable, Hashable { let term, def: String }
+struct Orient: Decodable { let run, file, out, comment: String; let gotchas: [String] }
+struct Hint: Decodable { let tier: Int; let title, kind, text: String; let step: Int?; let lines, answer: [String]?; let pieces: Bool; let code: String? }
+struct Lang: Decodable, Identifiable, Hashable {
+    let id, name, tag, why, engine, ci: String
+    let track: Bool?
+}
 struct Faction: Decodable, Identifiable {
     let id, name, short, color, handler, creed, pitch, lore: String
     var tint: Color { Color(hex: color) }
@@ -42,6 +50,9 @@ struct CurriculumData: Decodable {
     let petParts: [String: [PetPart]]
     let praxis: Praxis
     let judge0: [String: String]
+    let orient: [String: Orient]?
+    /// The 12 real languages (Boot Camp is a track, not a language).
+    var languages: [Lang] { langs.filter { $0.track != true } }
 }
 
 // MARK: - Checkpoint reports (same shape as RA.buildReport)
@@ -58,7 +69,7 @@ struct Report: Decodable {
 }
 struct StructureLine: Decodable { let ok: Bool; let hint: String }
 
-let EXT: [String: String] = ["python": "py", "javascript": "js", "typescript": "ts", "sql": "sql", "bash": "sh", "go": "go", "rust": "rs",
+let EXT: [String: String] = ["basics": "py", "python": "py", "javascript": "js", "typescript": "ts", "sql": "sql", "bash": "sh", "go": "go", "rust": "rs",
                              "swift": "swift", "kotlin": "kt", "java": "java", "csharp": "cs", "cpp": "cpp"]
 
 extension Color {
@@ -137,6 +148,7 @@ struct SaveData: Codable, Equatable {
     var fails: [String: Int] = [:]
     var primm: [String: Int] = [:]
     var notes: [String: String] = [:]
+    var hints: [String: Int] = [:]      // highest hint tier revealed per mission (1 nudge, 2 unscramble, 3 full answer)
     var legacy: [String: JSONValue] = [:]
     var pet = PetState()
     var settings = EngineSettings()
@@ -155,6 +167,7 @@ struct SaveData: Codable, Equatable {
         fails = (try? c.decodeIfPresent([String: Int].self, forKey: .fails)) ?? [:]
         primm = (try? c.decodeIfPresent([String: Int].self, forKey: .primm)) ?? [:]
         notes = (try? c.decodeIfPresent([String: String].self, forKey: .notes)) ?? [:]
+        hints = (try? c.decodeIfPresent([String: Int].self, forKey: .hints)) ?? [:]
         legacy = (try? c.decodeIfPresent([String: JSONValue].self, forKey: .legacy)) ?? [:]
         pet = (try? c.decodeIfPresent(PetState.self, forKey: .pet)) ?? PetState()
         settings = (try? c.decodeIfPresent(EngineSettings.self, forKey: .settings)) ?? EngineSettings()

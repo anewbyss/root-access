@@ -24,7 +24,7 @@ func open(_ code: String) -&gt; Bool {
     return true
 }
 for i in 1...3 { print(i) }</pre><p><code>switch</code> must be exhaustive, and there's no implicit fallthrough. <code>guard</code> keeps the happy path unindented.</p>`,
-  task: `Write <code>func threatLevel(_ score: Int) -&gt; String</code> using <code>switch</code> with range patterns and <code>default</code>, and <code>func validPin(_ pin: String) -&gt; Bool</code> that uses <code>guard</code>.`,
+  task: `Write <code>func threatLevel(_ score: Int) -&gt; String</code> using <code>switch</code> with range patterns and <code>default</code>, and <code>func validPin(_ pin: String) -&gt; Bool</code> that uses <code>guard</code>. Pass the <code>score</code> straight in. <code>validPin</code> returns <code>true</code> only for exactly 6 characters that are all digits, so <code>"123456"</code> passes and <code>"12345"</code>, <code>"12a456"</code> and <code>""</code> fail.`,
   starter: `// your code here\n`,
   checks: [[/func\s+threatLevel\s*\(\s*_\s+score\s*:\s*Int\s*\)\s*->\s*String/, "func threatLevel(_ score: Int) -> String"], [/switch\s+score/, "switch score { ... }"], [/case\s+\d+\s*(\.\.\.|\.\.<)\s*\d+/, "case 90...100:"], [/default\s*:/, "default:"], [/guard\s+.+\s+else\s*\{/, "guard condition else { return false }"]] },
 
@@ -34,7 +34,7 @@ if let ip = dossier["neo"] { print(ip) }
 guard let ip = dossier["trinity"] else { return }
 let fallback = dossier["morpheus"] ?? "unknown"
 let len = user?.profile?.bio?.count       // chaining</pre><p>Avoid force-unwrapping (<code>!</code>) unless a crash is truly impossible.</p>`,
-  task: `Write <code>func lookup(_ name: String, in db: [String: String]) -&gt; String</code> that uses <code>if let</code> or <code>guard let</code> and falls back with <code>??</code>. Don't use <code>!</code>.`,
+  task: `Write <code>func lookup(_ name: String, in db: [String: String]) -&gt; String</code> that uses <code>if let</code> or <code>guard let</code> and falls back with <code>??</code>. Don't use <code>!</code>. If the name isn't in <code>db</code>, return <code>db["default"]</code>, and if there's no default either, return <code>"unknown"</code>.`,
   starter: `// your code here\n`,
   checks: [[/func\s+lookup\s*\(\s*_\s+name\s*:\s*String\s*,\s*in\s+db\s*:\s*\[String\s*:\s*String\]\s*\)\s*->\s*String/, "func lookup(_ name: String, in db: [String: String]) -> String"], [/(if|guard)\s+let\s+\w+/, "if let / guard let"], [/\?\?/, "?? fallback"], [/^(?![\s\S]*\w!\s*[\.\)\s;])/, "no force unwrap (!)"]] },
 
@@ -46,7 +46,7 @@ for ip in ips { counts[ip, default: 0] += 1 }
 let doubled = [1, 2, 3].map { $0 * 2 }
 let big = [5, 50, 500].filter { $0 &gt; 10 }
 let total = [1, 2, 3].reduce(0, +)</pre><p>Collections are <b>value types</b>: assigning copies them (copy-on-write keeps that cheap).</p>`,
-  task: `Write <code>func tally(_ ips: [String]) -&gt; [String: Int]</code> using <code>counts[ip, default: 0] += 1</code>, and <code>func loud(_ ports: [Int]) -&gt; [Int]</code> using <code>filter</code> then <code>map</code>.`,
+  task: `Write <code>func tally(_ ips: [String]) -&gt; [String: Int]</code> using <code>counts[ip, default: 0] += 1</code>, and <code>func loud(_ ports: [Int]) -&gt; [Int]</code> using <code>filter</code> then <code>map</code>. <code>loud</code> keeps only ports above 1024 and multiplies each one by 10, so <code>loud([22, 8080, 443, 3000])</code> returns <code>[80800, 30000]</code>.`,
   starter: `// your code here\n`,
   checks: [[/func\s+tally\s*\(\s*_\s+ips\s*:\s*\[String\]\s*\)\s*->\s*\[String\s*:\s*Int\]/, "func tally(_ ips: [String]) -> [String: Int]"], [/default\s*:\s*0\s*\]\s*\+=\s*1/, "counts[ip, default: 0] += 1"], [/\.filter\s*\{/, ".filter { ... }"], [/\.map\s*\{/, ".map { ... }"]] },
 
@@ -62,7 +62,7 @@ retry(times: 3) { Bool.random() }        // trailing closure
 
 var handlers: [() -&gt; Void] = []
 func onAlert(_ h: @escaping () -&gt; Void) { handlers.append(h) }</pre><p>A closure that outlives the call must be <code>@escaping</code>. Inside classes, capture <code>[weak self]</code> to avoid retain cycles.</p>`,
-  task: `Write <code>func scan(host: String, port: Int = 443) -&gt; String</code>, a function <code>retry(times:_:)</code> taking a closure, call it with <b>trailing closure</b> syntax, and write <code>func onAlert(_ h: @escaping () -&gt; Void)</code> that stores the handler.`,
+  task: `Write <code>func scan(host: String, port: Int = 443) -&gt; String</code>, a function <code>retry(times:_:)</code> taking a closure, call it with <b>trailing closure</b> syntax, and write <code>func onAlert(_ h: @escaping () -&gt; Void)</code> that stores the handler. <code>scan</code> returns <code>"host:port"</code>, for example <code>"relay:443"</code>. <code>retry</code> calls the closure up to <code>times</code> times, returns <code>true</code> as soon as it returns <code>true</code>, and returns <code>false</code> if it never does. Declare <code>var handlers: [() -&gt; Void] = []</code> and have <code>onAlert</code> append to it.`,
   starter: `var handlers: [() -> Void] = []\n\n// your code here\n`,
   checks: [[/func\s+scan\s*\(\s*host\s*:\s*String\s*,\s*port\s*:\s*Int\s*=\s*443\s*\)/, "func scan(host: String, port: Int = 443)"], [/func\s+retry\s*\(\s*times\s*:\s*Int\s*,\s*_\s+\w+\s*:\s*\(\s*\)\s*->\s*Bool\s*\)/, "func retry(times: Int, _ op: () -> Bool)"], [/retry\s*\(\s*times\s*:\s*\d+\s*\)\s*\{/, "retry(times: 3) { ... }"], [/@escaping/, "@escaping"]] },
 
@@ -78,7 +78,7 @@ final class Session {         // reference type: shared
     init(id: String) { self.id = id }
     deinit { print("closed") }
 }</pre><p>Default to <code>struct</code>. Reach for <code>class</code> when you need shared identity, inheritance or <code>deinit</code>. SwiftUI is built on structs.</p>`,
-  task: `Define <code>struct Node</code> with <code>name</code>, <code>strength</code>, a computed <code>isHot: Bool</code> and a <code>mutating func boost(_ by: Int)</code>. Then define <code>final class Session</code> with <code>let id: String</code> and an <code>init</code>.`,
+  task: `Define <code>struct Node</code> with <code>name</code>, <code>strength</code>, a computed <code>isHot: Bool</code> and a <code>mutating func boost(_ by: Int)</code>. Then define <code>final class Session</code> with <code>let id: String</code> and an <code>init</code>. <code>strength</code> defaults to 0, <code>isHot</code> is <code>strength &gt; 80</code>, and <code>boost</code> adds to <code>strength</code>. <code>Session</code> has <code>init(id: String)</code>.`,
   starter: `// your code here\n`,
   checks: [[/struct\s+Node\s*\{/, "struct Node { ... }"], [/var\s+isHot\s*:\s*Bool\s*\{/, "var isHot: Bool { strength > 80 }"], [/mutating\s+func\s+boost/, "mutating func boost(_ by: Int)"], [/(final\s+)?class\s+Session/, "final class Session"], [/init\s*\(\s*id\s*:\s*String\s*\)/, "init(id: String)"]] },
 
@@ -113,7 +113,7 @@ func describe(_ e: Event) -&gt; String {
     }
 }
 enum Faction: String, CaseIterable { case logos, sentinel, meridian }</pre>`,
-  task: `Define <code>enum Event</code> with <code>login(user: String)</code>, <code>breach(severity: Int)</code> and <code>logout</code>, plus <code>func describe(_ e: Event) -&gt; String</code> with a <code>where</code> clause on one case. Add <code>enum Faction: String, CaseIterable</code>.`,
+  task: `Define <code>enum Event</code> with <code>login(user: String)</code>, <code>breach(severity: Int)</code> and <code>logout</code>, plus <code>func describe(_ e: Event) -&gt; String</code> with a <code>where</code> clause on one case. Add <code>enum Faction: String, CaseIterable</code>. Return text that mentions the user for <code>login</code> and the number for <code>breach</code> (like <code>"breach 3"</code>). Add a <code>where severity &gt;= 8</code> case that returns different words (like <code>"CRITICAL breach"</code>).`,
   starter: `// your code here\n`,
   checks: [[/enum\s+Event\s*\{/, "enum Event { ... }"], [/case\s+login\s*\(\s*user\s*:\s*String\s*\)/, "case login(user: String)"], [/case\s+\.breach\s*\(\s*let\s+\w+\s*\)\s*where/, "case .breach(let s) where s >= 8:"], [/enum\s+Faction\s*:\s*String\s*,\s*CaseIterable/, "enum Faction: String, CaseIterable"]] },
 
@@ -128,7 +128,7 @@ struct Keyword: Detector {
 }
 func strongest&lt;T: Comparable&gt;(_ xs: [T]) -&gt; T? { xs.max() }
 func merge&lt;C: Collection&gt;(_ c: C) -&gt; [C.Element] where C.Element: Hashable { Array(Set(c)) }</pre><p>Swift calls this protocol-oriented programming: compose behavior from protocols and extensions instead of deep class trees.</p>`,
-  task: `Define <code>protocol Detector</code>, an <code>extension Detector</code> with a default <code>count(in:)</code>, a <code>struct Keyword: Detector</code>, and a generic <code>func strongest&lt;T: Comparable&gt;(_ xs: [T]) -&gt; T?</code>.`,
+  task: `Define <code>protocol Detector</code>, an <code>extension Detector</code> with a default <code>count(in:)</code>, a <code>struct Keyword: Detector</code>, and a generic <code>func strongest&lt;T: Comparable&gt;(_ xs: [T]) -&gt; T?</code>. <code>Detector</code> requires <code>func detect(_ line: String) -&gt; Bool</code>. The extension's <code>count(in lines: [String]) -&gt; Int</code> counts matching lines. <code>Keyword</code> has <code>let word: String</code> and detects lines that contain it. <code>strongest</code> returns the largest value, or <code>nil</code> for an empty array.`,
   starter: `// your code here\n`,
   checks: [[/protocol\s+Detector/, "protocol Detector { ... }"], [/extension\s+Detector/, "extension Detector { ... }"], [/struct\s+Keyword\s*:\s*Detector/, "struct Keyword: Detector"], [/func\s+strongest\s*<\s*T\s*:\s*Comparable\s*>/, "func strongest<T: Comparable>(_ xs: [T]) -> T?"]] },
 
@@ -149,7 +149,7 @@ func sweep(_ hosts: [String]) async -&gt; Int {
         return up
     }
 }</pre><p>Swift 6 checks for data races at compile time. Swift 6.2's "approachable concurrency" can run code on the main actor by default, and you opt into parallelism with <code>@concurrent</code>.</p>`,
-  task: `Write <code>func ping(_ host: String) async -&gt; Bool</code>, an <code>actor Ledger</code> with a mutating method, and <code>func sweep(_ hosts: [String]) async -&gt; Int</code> using <code>withTaskGroup</code> and <code>for await</code>.`,
+  task: `Write <code>func ping(_ host: String) async -&gt; Bool</code>, an <code>actor Ledger</code> with a mutating method, and <code>func sweep(_ hosts: [String]) async -&gt; Int</code> using <code>withTaskGroup</code> and <code>for await</code>. <code>ping</code> returns <code>true</code> when the host name isn't empty. <code>Ledger</code> has <code>func record()</code> that adds 1 and <code>func total() -&gt; Int</code>. <code>sweep</code> returns how many hosts answered <code>true</code>.`,
   starter: `// your code here\n`,
   checks: [[/func\s+ping\s*\(\s*_\s+host\s*:\s*String\s*\)\s*async\s*->\s*Bool/, "func ping(_ host: String) async -> Bool"], [/actor\s+Ledger/, "actor Ledger { ... }"], [/withTaskGroup\s*\(/, "await withTaskGroup(of: Bool.self) { group in ... }"], [/group\.addTask/, "group.addTask { await ping(h) }"], [/for\s+await\s+/, "for await ok in group"]] },
 

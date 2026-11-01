@@ -11,6 +11,7 @@
 
   // Judge0 targets. ce = https://ce.judge0.com, extra = https://extra-ce.judge0.com
   RA.ENGINES = {
+    basics:     { host: "ce", id: 109, label: "Python 3.13 (Judge0)" },
     python:     { host: "ce", id: 109, label: "Python 3.13 (Judge0)" },
     javascript: { host: "ce", id: 102, label: "Node.js 22 (Judge0)" },
     typescript: { host: "ce", id: 101, label: "tsc + Node (Judge0)", opts: "--target esnext --lib esnext,dom" },
@@ -25,7 +26,7 @@
     cpp:        { host: "ce", id: 105, label: "GCC 14 C++23 (Judge0)", opts: "-std=c++23 -pthread -O1" }
   };
   RA.CI_TOOLCHAINS = {
-    python: "Python 3.13", javascript: "Node.js 22", typescript: "TypeScript 5.6 --strict", sql: "SQLite 3 (Python)",
+    basics: "Python 3.13", python: "Python 3.13", javascript: "Node.js 22", typescript: "TypeScript 5.6 --strict", sql: "SQLite 3 (Python)",
     bash: "Bash 5 + jq on Ubuntu 24.04", go: "Go (stable)", rust: "Rust (stable)", swift: "Swift 6 on macOS (Xcode)",
     kotlin: "Kotlin 2.x + kotlinx.coroutines", java: "JDK 25 + JUnit 5", csharp: ".NET 10 (dotnet run app.cs)", cpp: "g++ 14 -std=c++23"
   };
@@ -211,7 +212,7 @@ ra_eq() { if [ "$2" = "$3" ]; then echo "::cp::PASS::$1"; else echo "::cp::FAIL:
   RA.compose = (m, user, env) => {
     env = env || "judge0";
     const L = m.lang;
-    if (L === "python") return RA.genPython(m, user);
+    if (L === "python" || L === "basics") return RA.genPython(m, user);
     if (L === "javascript") return RA.genJs(m, user, false);
     if (L === "typescript") return RA.genJs(m, user, true);
     if (L === "sql") return RA.genSql(m, user);
@@ -287,9 +288,21 @@ def __ra_cp(ok, label, detail=""):
     print(f"::cp::{'PASS' if ok else 'FAIL'}::{label}::{d}", flush=True)
 def check(got, want, label="check"):
     __ra_cp(got == want, label, "" if got == want else f"got {got!r}, want {want!r}")
+__ra_src = ${JSON.stringify(user)}
+def output_of(**subs):
+    """Run the learner's program again in a clean namespace and return what it printed.
+    Keyword arguments replace a top-level assignment first, e.g. output_of(clearance=1)."""
+    import io, re, contextlib
+    s = __ra_src
+    for k, v in subs.items():
+        s = re.sub(r"^(" + k + r"\\s*=).*$", lambda mm: mm.group(1) + " " + repr(v), s, count=1, flags=re.M)
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        exec(compile(s, "mission.py", "exec"), {"__name__": "__main__"})
+    return buf.getvalue()
 __ra_user_ok = True
 try:
-    exec(compile(${JSON.stringify(user)}, "mission.py", "exec"), globals())
+    exec(compile(__ra_src, "mission.py", "exec"), globals())
 except BaseException as __e:
     __ra_user_ok = False
     __ra_cp(False, "Your code runs", f"{type(__e).__name__}: {__e}")
@@ -378,7 +391,7 @@ if ran:
   RA.judge0Request = (m, user, cfg) => {
     cfg = cfg || {};
     const eng = RA.ENGINES[m.lang];
-    const harness = m.lang in { python: 1, javascript: 1, typescript: 1, sql: 1 } ? "gen" : RA.HARNESS[m.id];
+    const harness = m.lang in { basics: 1, python: 1, javascript: 1, typescript: 1, sql: 1 } ? "gen" : RA.HARNESS[m.id];
     const meta = RA.harnessMeta(harness === "gen" ? "" : harness);
     if (meta.ciOnly) return { engine: eng.label, ciOnly: meta.ciOnly };
     const src = RA.compose(m, user, "judge0");
@@ -410,7 +423,7 @@ if ran:
     const results = RA.parseCheckpoints(stdout);
     RA.testSuiteSummary(stdout, results, run.user || "");
     if (status === "Compilation Error") results.unshift({ status: "FAIL", label: "Compiles", detail: compile.split("\n").filter((l) => /error/i.test(l)).slice(0, 4).join(" / ") || compile.slice(0, 400) });
-    else if (["python", "javascript", "sql", "bash"].indexOf(m.lang) < 0) results.unshift({ status: "PASS", label: "Compiles", detail: "" });
+    else if (["basics", "python", "javascript", "sql", "bash"].indexOf(m.lang) < 0) results.unshift({ status: "PASS", label: "Compiles", detail: "" });
     if (status !== "Accepted" && status !== "Compilation Error") results.push({ status: "FAIL", label: "Runs to completion", detail: status + (stderr ? ": " + stderr.slice(0, 300) : "") });
     (meta.checkpoints || []).forEach((label) => { if (!results.some((x) => x.label === label)) results.push({ status: "FAIL", label, detail: "not reached" }); });
     return { status, stdout, stderr, compile, results };

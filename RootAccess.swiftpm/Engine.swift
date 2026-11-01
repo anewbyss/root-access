@@ -31,6 +31,22 @@ final class Engine: @unchecked Sendable {
         (try? JSONDecoder().decode([StructureLine].self, from: Data(call("structure", [m.id, code]).utf8))) ?? []
     }
 
+    func hint(_ m: Mission, code: String, results: [CheckResult], tier: Int) -> Hint? {
+        let rep: String
+        if results.isEmpty { rep = "" } else {
+            let rs = results.map { ["status": $0.status, "label": $0.label, "detail": $0.detail ?? ""] }
+            rep = String(decoding: (try? JSONSerialization.data(withJSONObject: ["results": rs])) ?? Data(), as: UTF8.self)
+        }
+        return try? JSONDecoder().decode(Hint.self, from: Data(call("hint", [m.id, code, rep, tier]).utf8))
+    }
+    func explain(_ m: Mission, _ r: CheckResult) -> String {
+        let j = String(decoding: (try? JSONSerialization.data(withJSONObject: ["status": r.status, "label": r.label, "detail": r.detail ?? ""])) ?? Data(), as: UTF8.self)
+        return call("explain", [m.id, j])
+    }
+    func joinPieces(_ parts: [String]) -> String {
+        call("joinPieces", [String(decoding: (try? JSONSerialization.data(withJSONObject: parts)) ?? Data(), as: UTF8.self)])
+    }
+
     struct EngineError: LocalizedError { let message: String; var errorDescription: String? { message } }
     private struct Request: Decodable { let engine: String; let ciOnly: String?; let error: String?; let url: String?; let headers: [String: String]?; let body: String? }
 

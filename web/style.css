@@ -106,3 +106,23 @@ textarea.backup{margin-top:10px}
 select.field{appearance:auto}
 .lesson pre{font-size:12.5px}
 @media(max-width:600px){#app{padding:10px}.panel{padding:14px}.hud{flex-wrap:wrap}.editor{min-height:200px}}
+
+/* beginner guide */
+.banner{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:12px;border-color:var(--acc)}
+.orientbox,.terms{margin:10px 0;border:1px solid #143524;padding:8px 12px;border-radius:6px;background:#04100a}
+.orientbox summary,.terms summary{cursor:pointer;color:var(--acc);font-weight:600}
+.orient li{margin:4px 0}
+.terms dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 12px;margin:8px 0 0}
+.terms dt{color:var(--acc);font-family:var(--mono,monospace)}.terms dd{margin:0}
+ol.steps{padding-left:22px}ol.steps li{margin:6px 0;line-height:1.5;padding:2px 6px;border-radius:4px}
+ol.steps li.on{background:#0d2a1b;outline:1px solid var(--acc)}
+.req{margin:6px 0 10px}.req ul{list-style:none;padding:0;margin:4px 0}.req li{margin:3px 0;font-size:13px;color:#9cc7ad}.req li.ok{color:var(--acc)}
+.hintbar{gap:6px;align-items:center;flex-wrap:wrap;margin:6px 0}.hintbar button{font-size:13px}
+.hintbar button.on{border-color:var(--acc);color:var(--acc)}.hintbar button:disabled{opacity:.45;cursor:not-allowed}
+.hintbox{border:1px solid var(--acc);border-radius:6px;padding:10px 12px;margin:8px 0;background:#04100a}
+.hintbox pre{white-space:pre-wrap;overflow-x:auto}
+.pz .pzans{min-height:34px;border:1px dashed #1d4a32;border-radius:6px;padding:6px 6px 6px 30px;margin:6px 0}
+.pz .pzpool{display:flex;flex-direction:column;gap:6px;margin:6px 0}
+.pz .pzl{display:block;width:100%;text-align:left;font-family:var(--mono,monospace);white-space:pre;overflow-x:auto;font-size:13px;margin:3px 0}
+.pz .pzl.pc{display:inline-block;width:auto}.pz .pzpool:has(.pc){flex-direction:row;flex-wrap:wrap}
+.cplist .why{font-size:13px;color:#cfe9da;margin:4px 0 8px 18px;line-height:1.45}

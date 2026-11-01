@@ -28,7 +28,7 @@ String port = switch (service) {
 };
 for (int i = 0; i &lt; 5; i++) {}
 for (String h : hosts) {}</pre><p>Arrow-style <code>switch</code> has no fall-through and returns a value.</p>`,
-  task: `Write <code>static String threatLevel(int score)</code> using <code>if</code>/<code>else</code>, and <code>static int portFor(String service)</code> using a <b>switch expression</b> with <code>-&gt;</code> and <code>default</code>.`,
+  task: `Write <code>static String threatLevel(int score)</code> using <code>if</code>/<code>else</code>, and <code>static int portFor(String service)</code> using a <b>switch expression</b> with <code>-&gt;</code> and <code>default</code>. Use the thresholds 90, 60 and 30 for CRITICAL, HIGH, MEDIUM, and LOW otherwise. <code>portFor</code> maps <code>"ssh"</code> to 22, <code>"http"</code> to 80 and <code>"https"</code> to 443, and returns <code>-1</code> for anything else.`,
   starter: `public class Triage {\n    // your code here\n}\n`,
   checks: [[/static\s+String\s+threatLevel\s*\(\s*int\s+score\s*\)/, "static String threatLevel(int score)"], [/if\s*\(\s*score\s*>=?/, "if (score >= 90)"], [/static\s+int\s+portFor\s*\(\s*String\s+\w+\s*\)/, "static int portFor(String service)"], [/=\s*switch\s*\(|return\s+switch\s*\(/, "return switch (service) { ... }"], [/case\s+"[^"]+"\s*(,\s*"[^"]+"\s*)*->/, "case \"ssh\" -> 22;"], [/default\s*->/, "default -> ..."]] },
 
@@ -47,7 +47,7 @@ counts.getOrDefault("x", 0);</pre><p>Code to interfaces (<code>List</code>, <cod
   lesson: `<pre>static String scan(String host) { return scan(host, 443); }        // overload
 static String scan(String host, int port) { return host + ":" + port; }
 static int sum(int... xs) { int t = 0; for (int x : xs) t += x; return t; }   // varargs</pre><p>Java passes everything <b>by value</b>. For objects, the value is a reference, so methods can mutate an object but can't rebind the caller's variable. Java has no default arguments; use overloads instead.</p>`,
-  task: `Write two overloads, <code>scan(String host)</code> and <code>scan(String host, int port)</code>, where the first delegates to the second with 443. Add a varargs method <code>static int sum(int... xs)</code>.`,
+  task: `Write two overloads, <code>scan(String host)</code> and <code>scan(String host, int port)</code>, where the first delegates to the second with 443. Add a varargs method <code>static int sum(int... xs)</code>. <code>scan</code> returns <code>"host:port"</code>, for example <code>"relay:22"</code>. <code>sum()</code> with no arguments returns 0.`,
   starter: `public class Scanner {\n    // your code here\n}\n`,
   checks: [[/static\s+String\s+scan\s*\(\s*String\s+host\s*\)/, "static String scan(String host)"], [/static\s+String\s+scan\s*\(\s*String\s+host\s*,\s*int\s+port\s*\)/, "static String scan(String host, int port)"], [/return\s+scan\s*\(\s*host\s*,\s*443\s*\)/, "return scan(host, 443);"], [/int\s*\.\.\.\s*\w+/, "int... xs"]] },
 
@@ -78,7 +78,7 @@ public class Session {
     public int hits() { return hits; }
 }
 enum Faction { LOGOS, SENTINEL, MERIDIAN }</pre><p>Records generate the constructor, accessors, <code>equals</code>, <code>hashCode</code> and <code>toString</code>. Use them for data.</p>`,
-  task: `Define <code>record Node(String name, int strength)</code> with a compact constructor that validates input, a <code>class Session</code> with a <code>private final</code> field and a constructor, and an <code>enum</code>.`,
+  task: `Define <code>record Node(String name, int strength)</code> with a compact constructor that validates input, a <code>class Session</code> with a <code>private final</code> field and a constructor, and an <code>enum</code>. The compact constructor throws <code>IllegalArgumentException</code> when <code>name</code> is null or blank, or when <code>strength</code> is negative.`,
   starter: `// your code here\n`,
   checks: [[/record\s+Node\s*\(\s*String\s+name\s*,\s*int\s+strength\s*\)/, "record Node(String name, int strength)"], [/public\s+Node\s*\{|Node\s*\{\s*if/, "compact constructor: public Node { ... }"], [/class\s+Session/, "class Session"], [/private\s+final\s+\w+\s+\w+/, "private final String id;"], [/enum\s+\w+\s*\{/, "enum Faction { ... }"]] },
 
@@ -136,7 +136,7 @@ static double total(List&lt;? extends Number&gt; xs) { ... }    // PECS: produce
 Map&lt;String, Long&gt; byIp = lines.stream()
     .collect(Collectors.groupingBy(l -&gt; l.split(" ")[0], Collectors.counting()));
 int total = ports.stream().mapToInt(Integer::intValue).sum();</pre>`,
-  task: `Write <code>static List&lt;String&gt; failIps(List&lt;String&gt; lines)</code> using <code>.stream().filter(...).map(...)</code>, and <code>static Map&lt;String, Long&gt; byIp(List&lt;String&gt; lines)</code> using <code>Collectors.groupingBy</code> with <code>Collectors.counting()</code>.`,
+  task: `Write <code>static List&lt;String&gt; failIps(List&lt;String&gt; lines)</code> using <code>.stream().filter(...).map(...)</code>, and <code>static Map&lt;String, Long&gt; byIp(List&lt;String&gt; lines)</code> using <code>Collectors.groupingBy</code> with <code>Collectors.counting()</code>. Lines look like <code>"10.0.0.9 FAIL"</code>. <code>failIps</code> returns the IP of every FAIL line in order, repeats included. <code>byIp</code> counts every line per IP, whatever its status.`,
   starter: `import java.util.*;\nimport java.util.stream.*;\n\npublic class Streams {\n    // your code here\n}\n`,
   checks: [[/\.stream\(\)/, "lines.stream()"], [/\.filter\s*\(\s*\w+\s*->/, ".filter(l -> ...)"], [/\.map\s*\(\s*\w+\s*->/, ".map(l -> ...)"], [/Collectors\.groupingBy\s*\(/, "Collectors.groupingBy(...)"], [/Collectors\.counting\(\)/, "Collectors.counting()"]] },
 
@@ -149,7 +149,7 @@ CompletableFuture&lt;String&gt; cf = CompletableFuture.supplyAsync(() -&gt; fetc
     .thenApply(String::toUpperCase)
     .exceptionally(e -&gt; "offline");
 var seen = new ConcurrentHashMap&lt;String, Integer&gt;();</pre><p>Virtual threads let you write simple blocking code that scales to millions of concurrent tasks.</p>`,
-  task: `Write <code>static int sweep(List&lt;String&gt; hosts)</code> using <code>Executors.newVirtualThreadPerTaskExecutor()</code> in try-with-resources, an <code>AtomicInteger</code> counter, and one <code>CompletableFuture.supplyAsync</code> chain with <code>thenApply</code>.`,
+  task: `Write <code>static int sweep(List&lt;String&gt; hosts)</code> using <code>Executors.newVirtualThreadPerTaskExecutor()</code> in try-with-resources, an <code>AtomicInteger</code> counter, and one <code>CompletableFuture.supplyAsync</code> chain with <code>thenApply</code>. A host counts as reachable when its name isn't empty, so <code>sweep(List.of("a", "", "c"))</code> returns 2.`,
   starter: `import java.util.*;\nimport java.util.concurrent.*;\nimport java.util.concurrent.atomic.*;\n\npublic class Sweep {\n    // your code here\n}\n`,
   checks: [[/newVirtualThreadPerTaskExecutor\s*\(\s*\)/, "Executors.newVirtualThreadPerTaskExecutor()"], [/try\s*\(\s*var\s+\w+\s*=\s*Executors/, "try (var exec = Executors....)"], [/AtomicInteger/, "new AtomicInteger()"], [/CompletableFuture\.supplyAsync/, "CompletableFuture.supplyAsync(...)"], [/\.thenApply\s*\(/, ".thenApply(...)"]] },
 
@@ -171,7 +171,7 @@ static final Pattern JNDI = Pattern.compile("\\\\$\\\\{\\\\s*jndi:", Pattern.CAS
 static String sanitize(String in) { return JNDI.matcher(in).find() ? "[BLOCKED]" : in; }
 
 @Test void blocksJndi() { assertEquals("[BLOCKED]", sanitize("\${jndi:ldap://x}")); }</pre>`,
-  task: `Define a <code>sealed interface Event permits ...</code> with record implementations, an exhaustive <b>pattern-matching switch</b> that includes a <code>when</code> guard, a <code>sanitize</code> method that blocks <code>\${jndi:</code> using <code>Pattern</code>, and JUnit 5 <code>@Test</code> methods with <code>assertEquals</code>.`,
+  task: `Define a <code>sealed interface Event permits ...</code> with record implementations, an exhaustive <b>pattern-matching switch</b> that includes a <code>when</code> guard, a <code>sanitize</code> method that blocks <code>\${jndi:</code> using <code>Pattern</code>, and JUnit 5 <code>@Test</code> methods with <code>assertEquals</code>. Make it <code>static String sanitize(String input)</code>: return <code>"[BLOCKED]"</code> when the input contains <code>\${jndi:</code>, and return the input unchanged otherwise.`,
   starter: `import java.util.regex.*;\nimport static org.junit.jupiter.api.Assertions.*;\nimport org.junit.jupiter.api.Test;\n\n// your code here\n`,
   checks: [[/sealed\s+interface\s+Event\s+permits/, "sealed interface Event permits Login, Breach, Logout"], [/record\s+\w+\s*\([^)]*\)\s+implements\s+Event/, "record Login(String user) implements Event"], [/case\s+\w+\s+\w+\s+when\s+/, "case Breach b when b.severity() >= 8 ->"], [/Pattern\.compile\s*\(/, "Pattern.compile(...)"], [/jndi/i, "detect jndi"], [/@Test/, "@Test"], [/assertEquals\s*\(/, "assertEquals(...)"]] }
 ]);

@@ -55,7 +55,7 @@ func counter() func() int {
     return func() int { n++; return n }
 }
 defer f.Close()   // runs when the function returns</pre>`,
-  task: `Write <code>func makeCounter(start int) func() int</code> (a closure), and <code>func minMax(nums ...int) (min, max int)</code> with named results.`,
+  task: `Write <code>func makeCounter(start int) func() int</code> (a closure), and <code>func minMax(nums ...int) (min, max int)</code> with named results. <code>makeCounter(10)</code> returns a function whose calls count up by 1 from 10. <code>minMax(4, -2, 9, 3)</code> returns <code>-2, 9</code>.`,
   starter: `package main\n\n// your code here\n`,
   checks: [[/func\s+makeCounter\s*\(\s*start\s+int\s*\)\s+func\s*\(\s*\)\s+int/, "func makeCounter(start int) func() int"], [/return\s+func\s*\(\s*\)\s+int/, "return func() int { ... }"], [/func\s+minMax\s*\(\s*nums\s+\.\.\.int\s*\)\s*\(\s*min\s*,\s*max\s+int\s*\)/, "func minMax(nums ...int) (min, max int)"]] },
 
@@ -137,7 +137,7 @@ for _, h := range hosts {
     }(h)
 }
 wg.Wait()</pre><p>Shared memory needs a lock. Run <code>go test -race</code> to catch data races.</p>`,
-  task: `Write <code>func sweep(hosts []string) int</code> that pings every host in its own goroutine, counts the ones where <code>ping(h)</code> returns true using a <code>sync.Mutex</code>, and waits with a <code>sync.WaitGroup</code>.`,
+  task: `Write <code>func sweep(hosts []string) int</code> that pings every host in its own goroutine, counts the ones where <code>ping(h)</code> returns true using a <code>sync.Mutex</code>, and waits with a <code>sync.WaitGroup</code>. A host counts as reachable when its name isn't empty, so <code>sweep([]string{"a", "", "c"})</code> returns 2.`,
   starter: `package main\n\nimport "sync"\n\nfunc ping(h string) bool { return len(h) > 0 }\n\n// your code here\n`,
   checks: [[/sync\.WaitGroup/, "var wg sync.WaitGroup"], [/sync\.Mutex/, "var mu sync.Mutex"], [/go\s+func/, "go func(h string) { ... }(h)"], [/defer\s+wg\.Done\(\)/, "defer wg.Done()"], [/mu\.Lock\(\)/, "mu.Lock()"], [/mu\.Unlock\(\)/, "mu.Unlock()"], [/wg\.Wait\(\)/, "wg.Wait()"]] },
 

@@ -37,13 +37,13 @@
     });
     return out;
   };
-  var meta = function (m) { return RA.harnessMeta(m.lang in { python: 1, javascript: 1, typescript: 1, sql: 1 } ? "" : RA.HARNESS[m.id] || ""); };
+  var meta = function (m) { return RA.harnessMeta(m.lang in { basics: 1, python: 1, javascript: 1, typescript: 1, sql: 1 } ? "" : RA.HARNESS[m.id] || ""); };
   var src = function (k) { var s = RA.SOURCES[k]; return s ? { label: s.label, url: s.url } : { label: k, url: "" }; };
   g.RAX = {
     data: function () {
       var langs = Object.keys(RA.langs).map(function (k) {
         var l = RA.langs[k];
-        return { id: k, name: l.name, tag: l.tag, why: l.why, engine: RA.ENGINES[k].label, ci: RA.CI_TOOLCHAINS[k] || "" };
+        return { id: k, name: l.name, tag: l.tag, why: l.why, engine: RA.ENGINES[k].label, ci: RA.CI_TOOLCHAINS[k] || "", track: !!l.track };
       });
       var dossiers = {};
       Object.keys(RA.DOSSIERS).forEach(function (k) {
@@ -63,20 +63,32 @@
           var mt = meta(m);
           return { id: m.id, lang: m.lang, rank: m.rank, module: m.module, xp: m.xp, title: m.title, concept: m.concept,
             lesson: segs(m.lesson), task: strip(m.task), starter: m.starter, ciOnly: mt.ciOnly || null,
-            checkpoints: mt.checkpoints || [], solution: (RA.SOLUTIONS && RA.SOLUTIONS[m.id]) || "" };
+            checkpoints: mt.checkpoints || [], solution: (RA.SOLUTIONS && RA.SOLUTIONS[m.id]) || "",
+            steps: RA.stepsFor(m).map(strip), keyTerms: RA.keyTerms(m, 6) };
         }),
         langs: langs, factions: factions, dossiers: dossiers, modules: RA.MODULES,
         intel: RA.INTEL.slice().sort(function (a, b) { return a.year - b.year; }),
         petStages: RA.PET_STAGES, petParts: parts,
         praxis: { stages: RA.PRAXIS.stages, selfExplain: RA.PRAXIS.selfExplain, fadeAfter: RA.PRAXIS.fadeAfter,
           evidence: RA.PRAXIS.evidence.map(function (e) { return { claim: e.claim, source: src(e.src) }; }) },
-        judge0: RA.judge0Hosts
+        judge0: RA.judge0Hosts,
+        orient: (function () { var o = {}; Object.keys(RA.ORIENT).forEach(function (k) { var x = RA.ORIENT[k];
+          o[k] = { run: strip(x.run), file: strip(x.file), out: strip(x.out), comment: strip(x.comment), gotchas: x.gotchas.map(strip) }; }); return o; })()
       });
     },
     brief: function (id, faction) { return RA.brief(BY[id], faction); },
     structure: function (id, code) {
       return JSON.stringify(BY[id].checks.map(function (c) { c.re.lastIndex = 0; return { ok: c.re.test(code), hint: c.hint }; }));
     },
+    // Hint ladder, linked to this mission's own steps, checks, checkpoints and reference solution.
+    hint: function (id, code, reportJSON, tier) {
+      var m = BY[id], rep = reportJSON ? JSON.parse(reportJSON) : null;
+      var h = RA.hint(m, code, rep, Number(tier), (RA.SOLUTIONS && RA.SOLUTIONS[id]) || "");
+      return JSON.stringify({ tier: h.tier, title: h.title, kind: h.kind, text: strip(h.html), step: h.step == null ? null : h.step,
+        lines: h.lines || null, answer: h.answer || null, pieces: !!h.pieces, code: h.code || null });
+    },
+    explain: function (id, resultJSON) { return strip(RA.explain(BY[id], JSON.parse(resultJSON))); },
+    joinPieces: function (partsJSON) { return RA.joinPieces(JSON.parse(partsJSON)); },
     request: function (id, code, cfg) { return JSON.stringify(RA.judge0Request(BY[id], code, JSON.parse(cfg || "{}"))); },
     finish: function (id, req, resp, code) {
       var rep = RA.judge0Finish(BY[id], JSON.parse(req), JSON.parse(resp), code);
