@@ -3,7 +3,7 @@
 //   tools/build.js rewrites VERSION and SHELL, so every curriculum change ships as a new cache.
 // - Runtime packs (Pyodide, TypeScript, self-hosted vendor/): cache-first, cached on first use or via Settings.
 // - Everything else (Judge0, external links): straight to the network, never cached.
-const VERSION = "b37fdbdcaf57"; // @@VERSION
+const VERSION = "bbfc79d35618"; // @@VERSION
 const SHELL = ["./","index.html","icon.svg","icon-192.png","manifest.webmanifest","style.css","curriculum/_core.js","curriculum/_world.js","curriculum/_dossiers.js","curriculum/_engine.js","curriculum/_local.js","curriculum/basics.js","curriculum/python.js","curriculum/javascript.js","curriculum/typescript.js","curriculum/sql.js","curriculum/bash.js","curriculum/go.js","curriculum/rust.js","curriculum/swift.js","curriculum/kotlin.js","curriculum/java.js","curriculum/csharp.js","curriculum/cpp.js","curriculum/_steps.js","curriculum/_guide.js","curriculum/checkpoints.js","curriculum/solutions.js","zip.js","runner.js","app.js","worker.js","icon-512.png"]; // @@SHELL
 const APP = "ra-app-" + VERSION, PACKS = "ra-packs-v1";
 const isPack = (u) => /\/pyodide\/v[\d.]+\/full\//.test(u.pathname) || /\/npm\/typescript@[\d.]+\/lib\//.test(u.pathname) || (u.origin === self.location.origin && u.pathname.includes("/vendor/"));

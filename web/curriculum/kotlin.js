@@ -108,7 +108,7 @@ fun describe(e: Event): String = when (e) {        // exhaustive, no else needed
     is Breach -&gt; if (e.severity &gt;= 8) "CRITICAL" else "breach"
     Logout -&gt; "logout"
 }
-enum class Faction(val color: String) { LOGOS("#c79bff"), SENTINEL("#5ad1ff"), MERIDIAN("#7dff9a") }</pre><p>Sealed types model state machines and UI state. The compiler tells you when you forget a case.</p>`,
+enum class Faction(val color: String) { LOGOS("#c79bff"), SENTINEL("#5ad1ff"), MERIDIAN("#7dff9a"), LANTERN("#ffc24a") }</pre><p>Sealed types model state machines and UI state. The compiler tells you when you forget a case.</p>`,
   task: `Define <code>sealed interface Event</code> with <code>Login</code>, <code>Breach</code> and <code>data object Logout</code>, then write an exhaustive <code>when</code> with <code>is</code> checks and no <code>else</code>. Add an <code>enum class</code> with a property.`,
   starter: `// your code here\n`,
   checks: [[/sealed\s+(interface|class)\s+Event/, "sealed interface Event"], [/data\s+object\s+Logout|object\s+Logout/, "data object Logout : Event"], [/is\s+Login\s*->/, "is Login ->"], [/is\s+Breach\s*->/, "is Breach ->"], [/enum\s+class\s+\w+\s*\(/, "enum class Faction(val color: String)"]] },

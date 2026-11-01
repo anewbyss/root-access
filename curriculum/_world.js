@@ -28,6 +28,15 @@
     creed: "They can cut the cables. They cannot cut the signal.",
     pitch: "A fictional occupied region whose people are fighting for self-determination. Their weapon is information: keeping networks alive through blackouts, documenting abuses, protecting journalists and getting the truth out past censors. Inspired by real internet shutdowns in conflict zones around the world.",
     lore: "Meridian has lived through 41 internet shutdowns in six years. Every kid knows how to set up a mesh node before they can drive."
+  },
+  lantern: {
+    name: "The Lantern Collective",
+    short: "LANTERN",
+    color: "#ffc24a",
+    handler: "Archivist Wren Okafor",
+    creed: "Classified is just another word for locked. Every lock is made of code.",
+    pitch: "A network of whistleblowers, ex-contractors and night-shift sky-watchers convinced their government is sitting on proof of non-human craft, a shelved super-soldier program and files nobody can explain. They recover dead archives, crack legacy formats, verify every page and publish it where it can't be pulled. Join them to learn data recovery, parsing, verification and publishing, and decide for yourself what's real.",
+    lore: "Formed the week of the July 2023 congressional hearing on unidentified anomalous phenomena. Their founding text is the CIA's own declassified Stargate Project, which spent two decades testing psychic spies. Wren's line: \"If they admitted that one, what are they still sitting on?\""
   }
 };
 

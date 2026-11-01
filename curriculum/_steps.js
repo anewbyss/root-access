@@ -612,7 +612,7 @@
     "Write <code>func describe(_ e: Event) -&gt; String {</code> with <code>switch e {</code>.",
     "<code>case .login(let user): return \"login \\(user)\"</code> pulls the data out of the case.",
     "Put the <code>where</code> case BEFORE the general one: <code>case .breach(let s) where s &gt;= 8: return \"CRITICAL breach\"</code>, then <code>case .breach(let s): return \"breach \\(s)\"</code>.",
-    "Add <code>case .logout: return \"logout\"</code>, then <code>enum Faction: String, CaseIterable { case logos, sentinel, meridian }</code>."
+    "Add <code>case .logout: return \"logout\"</code>, then <code>enum Faction: String, CaseIterable { case logos, sentinel, meridian, lantern }</code>."
   ],
   sw9: [
     "Define <code>protocol Detector { func detect(_ line: String) -&gt; Bool }</code>.",
@@ -766,7 +766,7 @@
       "Inside, add a compact constructor, <code>public Node {</code>, which runs your checks before the fields are set.",
       "Add <code>if (name == null || name.isBlank()) throw new IllegalArgumentException(\"name required\");</code> and <code>if (strength &lt; 0) throw new IllegalArgumentException(\"strength must be &gt;= 0\");</code>, then close both braces.",
       "Write <code>class Session { private final String id; Session(String id) { this.id = id; } String id() { return id; } }</code>. <code>private final</code> means only this class can see the field, and it can only be set once.",
-      "Add an enum: <code>enum Faction { LOGOS, SENTINEL, MERIDIAN }</code>."
+      "Add an enum: <code>enum Faction { LOGOS, SENTINEL, MERIDIAN, LANTERN }</code>."
   ],
   jv7: [
       "Add <code>import java.io.*;</code> and <code>import java.nio.file.*;</code> at the top.",

@@ -77,7 +77,7 @@ public class Session {
     public void hit() { hits++; }
     public int hits() { return hits; }
 }
-enum Faction { LOGOS, SENTINEL, MERIDIAN }</pre><p>Records generate the constructor, accessors, <code>equals</code>, <code>hashCode</code> and <code>toString</code>. Use them for data.</p>`,
+enum Faction { LOGOS, SENTINEL, MERIDIAN, LANTERN }</pre><p>Records generate the constructor, accessors, <code>equals</code>, <code>hashCode</code> and <code>toString</code>. Use them for data.</p>`,
   task: `Define <code>record Node(String name, int strength)</code> with a compact constructor that validates input, a <code>class Session</code> with a <code>private final</code> field and a constructor, and an <code>enum</code>. The compact constructor throws <code>IllegalArgumentException</code> when <code>name</code> is null or blank, or when <code>strength</code> is negative.`,
   starter: `// your code here\n`,
   checks: [[/record\s+Node\s*\(\s*String\s+name\s*,\s*int\s+strength\s*\)/, "record Node(String name, int strength)"], [/public\s+Node\s*\{|Node\s*\{\s*if/, "compact constructor: public Node { ... }"], [/class\s+Session/, "class Session"], [/private\s+final\s+\w+\s+\w+/, "private final String id;"], [/enum\s+\w+\s*\{/, "enum Faction { ... }"]] },

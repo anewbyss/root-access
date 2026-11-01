@@ -64,6 +64,10 @@ h1{font-size:clamp(1.9rem,5vw,3.7rem);line-height:1.05}
 .fcard{text-align:left;padding:18px;display:flex;flex-direction:column;gap:8px;background:var(--panel)}
 .fcard .tag{font-size:.786rem;letter-spacing:.2em}
 .fcard q{font-style:normal;color:var(--head)}
+/* each card carries its own faction colour (--acc set inline); re-derive the text accent from it */
+.fcard{--acc-t:var(--acc)}.fcard:hover{border-color:var(--acc-t)}
+:root[data-scheme="light"] .fcard{--acc-t:color-mix(in oklab,var(--acc) 48%,black)}
+@media (prefers-color-scheme:light){:root:not([data-scheme="dark"]) .fcard{--acc-t:color-mix(in oklab,var(--acc) 48%,black)}}
 .grid{display:grid;grid-template-columns:260px 1fr;gap:var(--gap)}
 @media(max-width:860px){.grid{grid-template-columns:1fr}}
 .langs{display:flex;flex-direction:column;gap:4px;max-height:75vh;overflow:auto}

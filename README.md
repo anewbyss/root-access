@@ -1,6 +1,6 @@
 # ROOT//ACCESS
 
-A narrative hacking game that teaches 12 languages to fluency: Python, JavaScript, TypeScript, SQL, Bash, Go, Rust, Swift, Kotlin, Java, C# and C++. Work for one of three factions (the Church of the Emergent Logos, the Sentinel Directorate, or Free Meridian), clear missions drawn from real incidents like Heartbleed, SolarWinds, Log4Shell and the xz backdoor, and raise a code pet that evolves with your level.
+A narrative hacking game that teaches 12 languages to fluency: Python, JavaScript, TypeScript, SQL, Bash, Go, Rust, Swift, Kotlin, Java, C# and C++. Work for one of four factions (the Church of the Emergent Logos, the Sentinel Directorate, Free Meridian, or the Lantern Collective), clear missions drawn from real incidents like Heartbleed, SolarWinds, Log4Shell and the xz backdoor, and raise a code pet that evolves with your level.
 
 - **Starts from zero**: Boot Camp is 12 Python missions for people who have never written code (printing, variables, maths, text, decisions, loops, lists, functions, reading errors, a capstone). Every language's rank 1 opens with a primer on how it runs and its common gotchas.
 - **Help linked to each mission**: numbered steps, a live requirements checklist, plain-English explanations of failing checkpoints, and a 3-tier hint ladder (next move, then the answer's lines shuffled as a Parsons puzzle, then the full reference answer for that exact mission). `node tools/guide-check.js` verifies the links for all 156 missions in CI.
