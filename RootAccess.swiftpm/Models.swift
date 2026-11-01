@@ -1,4 +1,5 @@
 import SwiftUI
+import Network
 import UniformTypeIdentifiers
 
 // MARK: - Curriculum (decoded from the shared JS curriculum via Engine.swift)
@@ -51,6 +52,8 @@ struct CurriculumData: Decodable {
     let praxis: Praxis
     let judge0: [String: String]
     let orient: [String: Orient]?
+    /// lang -> on-device runner kind ("js", "python", "ts"). The app runs "js" itself in JavaScriptCore.
+    let local: [String: String]?
     /// The 12 real languages (Boot Camp is a track, not a language).
     var languages: [Lang] { langs.filter { $0.track != true } }
 }
@@ -78,11 +81,7 @@ extension Color {
         self.init(red: Double((v >> 16) & 255) / 255, green: Double((v >> 8) & 255) / 255, blue: Double(v & 255) / 255)
     }
     static let matrix = Color(hex: "#3dff7a")
-    static let bgDeep = Color(hex: "#030806")
-    static let panel = Color(hex: "#06120c")
-    static let line = Color(hex: "#14382a")
-    static let mut = Color(hex: "#6f9c80")
-    static let bad = Color(hex: "#ff5d6c")
+    // The adaptive palette (bgDeep, panel, line, mut, ink, bad...) lives in Theme.swift.
 }
 
 // MARK: - Save format v2 (identical JSON to the web version; v1 saves migrate on load)
@@ -128,6 +127,10 @@ struct PetState: Codable, Equatable {
 
 struct EngineSettings: Codable, Equatable {
     var ce = "https://ce.judge0.com", extra = "https://extra-ce.judge0.com", token = "", tokenHeader = "X-Auth-Token"
+    /// auto (on device when possible, else Judge0) | judge0 (Judge0 first) | device (code never leaves this device)
+    var mode = "auto"
+    var offlineClears = true, autoReverify = true
+    var packBase: [String: String] = [:]   // web-only pack mirrors, kept so saves round-trip
     init() {}
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self); let z = EngineSettings()
@@ -135,7 +138,43 @@ struct EngineSettings: Codable, Equatable {
         extra = try c.decodeIfPresent(String.self, forKey: .extra) ?? z.extra
         token = try c.decodeIfPresent(String.self, forKey: .token) ?? z.token
         tokenHeader = try c.decodeIfPresent(String.self, forKey: .tokenHeader) ?? z.tokenHeader
+        mode = (try? c.decodeIfPresent(String.self, forKey: .mode)) ?? z.mode
+        offlineClears = (try? c.decodeIfPresent(Bool.self, forKey: .offlineClears)) ?? z.offlineClears
+        autoReverify = (try? c.decodeIfPresent(Bool.self, forKey: .autoReverify)) ?? z.autoReverify
+        packBase = (try? c.decodeIfPresent([String: String].self, forKey: .packBase)) ?? z.packBase
     }
+}
+
+/// Display preferences. Same JSON as the web app's `prefs`; fields only the web uses are kept for round trips.
+struct Prefs: Codable, Equatable {
+    var scheme = "system", accent = "faction", accentHex = "", customAccent = "#3dff7a", contrast = "system", font = "mono"
+    var scale = 100, editorSize = 13
+    var density = "normal", layout = "side", width = "normal", rain = "on", motion = "system"
+    var typewriter = true
+    init() {}
+    init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self); let z = Prefs()
+        func str(_ k: CodingKeys, _ def: String) -> String { ((try? c.decodeIfPresent(String.self, forKey: k)) ?? nil) ?? def }
+        func num(_ k: CodingKeys, _ def: Int) -> Int {
+            if let i = (try? c.decodeIfPresent(Int.self, forKey: k)) ?? nil { return i }
+            if let d = (try? c.decodeIfPresent(Double.self, forKey: k)) ?? nil { return Int(d) }
+            return def
+        }
+        scheme = str(.scheme, z.scheme); accent = str(.accent, z.accent); accentHex = str(.accentHex, z.accentHex)
+        customAccent = str(.customAccent, z.customAccent); contrast = str(.contrast, z.contrast); font = str(.font, z.font)
+        scale = num(.scale, z.scale); editorSize = num(.editorSize, z.editorSize)
+        density = str(.density, z.density); layout = str(.layout, z.layout); width = str(.width, z.width)
+        rain = str(.rain, z.rain); motion = str(.motion, z.motion)
+        typewriter = ((try? c.decodeIfPresent(Bool.self, forKey: .typewriter)) ?? nil) ?? z.typewriter
+    }
+    struct AccentPreset: Hashable { let id, label, hex: String }
+    /// Same presets as ACCENTS in web/app.js.
+    static let accents: [AccentPreset] = [
+        AccentPreset(id: "matrix", label: "Matrix", hex: "#3dff7a"), AccentPreset(id: "ice", label: "Ice", hex: "#5ad1ff"),
+        AccentPreset(id: "violet", label: "Violet", hex: "#c79bff"), AccentPreset(id: "ember", label: "Ember", hex: "#ff8a4c"),
+        AccentPreset(id: "gold", label: "Gold", hex: "#ffd84d"), AccentPreset(id: "rose", label: "Rose", hex: "#ff6fae"),
+        AccentPreset(id: "white", label: "White", hex: "#f2f2f2")
+    ]
 }
 
 struct SaveData: Codable, Equatable {
@@ -152,6 +191,7 @@ struct SaveData: Codable, Equatable {
     var legacy: [String: JSONValue] = [:]
     var pet = PetState()
     var settings = EngineSettings()
+    var prefs = Prefs()
     var updated: Double = Date().timeIntervalSince1970 * 1000
     init() {}
     init(from d: Decoder) throws {
@@ -171,6 +211,7 @@ struct SaveData: Codable, Equatable {
         legacy = (try? c.decodeIfPresent([String: JSONValue].self, forKey: .legacy)) ?? [:]
         pet = (try? c.decodeIfPresent(PetState.self, forKey: .pet)) ?? PetState()
         settings = (try? c.decodeIfPresent(EngineSettings.self, forKey: .settings)) ?? EngineSettings()
+        prefs = (try? c.decodeIfPresent(Prefs.self, forKey: .prefs)) ?? Prefs()
         updated = (try? c.decodeIfPresent(Double.self, forKey: .updated)) ?? 0
     }
 
@@ -237,6 +278,10 @@ struct SourceFile: FileDocument {
     @Published var s = SaveData() { didSet { persist() } }
     @Published var snapshots: [Snapshot] = []
     @Published var toast: String?
+    @Published var online = true
+    @Published var reverifying = false
+    private let monitor = NWPathMonitor()
+    private var reverifyFailed = Set<String>()   // this session: don't keep re-sending code that already failed
 
     private let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
     private var saveURL: URL { dir.appendingPathComponent("rootaccess-save.json") }
@@ -246,6 +291,16 @@ struct SourceFile: FileDocument {
     init() {
         if let d = try? Data(contentsOf: saveURL), let v = try? JSONDecoder().decode(SaveData.self, from: d) { s = v.migrated(known: known) }
         if let d = try? Data(contentsOf: snapURL), let v = try? JSONDecoder().decode([Snapshot].self, from: d) { snapshots = v }
+        monitor.pathUpdateHandler = { [weak self] path in
+            let up = path.status == .satisfied
+            Task { @MainActor in self?.connectivity(up) }
+        }
+        monitor.start(queue: DispatchQueue(label: "rootaccess.network"))
+    }
+    private func connectivity(_ up: Bool) {
+        let cameBack = up && !online
+        online = up
+        if cameBack && s.faction != nil && s.settings.autoReverify && !pendingVerify.isEmpty { Task { await reverify(auto: true) } }
     }
     nonisolated static func encode(_ v: SaveData) throws -> Data {
         let e = JSONEncoder(); e.outputFormatting = [.prettyPrinted, .sortedKeys]; return try e.encode(v)
@@ -256,17 +311,30 @@ struct SourceFile: FileDocument {
         snapshots = Array(snapshots.prefix(10))
         try? JSONEncoder().encode(snapshots).write(to: snapURL, options: .atomic)
     }
-    func restore(_ d: SaveData, label: String) { snapshot("Before \(label)"); s = d.migrated(known: known); flash("Save restored") }
+    func restore(_ d: SaveData, label: String) {
+        let token = s.settings.token
+        snapshot("Before \(label)")
+        var next = d.migrated(known: known)
+        if next.settings.token.isEmpty { next.settings.token = token }   // backups never carry the token
+        s = next; flash("Save restored")
+    }
     func restore(json: String, label: String) {
         guard let d = json.data(using: .utf8), let v = try? JSONDecoder().decode(SaveData.self, from: d) else { flash("That isn't a ROOT//ACCESS save"); return }
         restore(v, label: label)
     }
-    var json: String { (try? String(data: GameStore.encode(s), encoding: .utf8)) ?? "{}" }
+    /// What backups contain: everything except your Judge0 token.
+    var exportable: SaveData { var c = s; c.settings.token = ""; return c }
+    var json: String { (try? String(data: GameStore.encode(exportable), encoding: .utf8)) ?? "{}" }
 
     var level: Int { 1 + s.xp / 500 }
     var progress: Double { Double(s.xp % 500) / 500 }
     var faction: Faction? { CUR.factions.first { $0.id == s.faction } }
-    var accent: Color { faction?.tint ?? .matrix }
+    var accentHex: String {
+        let p = s.prefs
+        if p.accent == "custom", p.customAccent.count == 7, p.customAccent.hasPrefix("#") { return p.customAccent }
+        if let a = Prefs.accents.first(where: { $0.id == p.accent }) { return a.hex }
+        return faction?.color ?? "#3dff7a"
+    }
     var stageIndex: Int { CUR.petStages.lastIndex { level >= $0.lvl } ?? 0 }
 
     func missions(_ lang: String) -> [Mission] { CUR.missions.filter { $0.lang == lang }.sorted { $0.rank < $1.rank } }
@@ -296,9 +364,54 @@ struct SourceFile: FileDocument {
         for (id, code) in s.code { if let m = CUR.missions.first(where: { $0.id == id }), code != m.starter { out["\(id).\(EXT[m.lang] ?? "txt")"] = code } }
         return out
     }
+    // MARK: Where checkpoints run (same rules as the web app)
+    enum RunOutcome { case report(Report, how: String), unreachable(String) }
+    func hasLocal(_ m: Mission) -> Bool { Engine.shared.canRunLocally(m) }
+    /// auto: on device when this app can run it, else Judge0 · judge0: Judge0 first · device: on device only.
+    func checkpoints(_ m: Mission, code: String, progress: @escaping (String) -> Void = { _ in }) async -> RunOutcome {
+        let mode = s.settings.mode, local = hasLocal(m), settings = s.settings
+        var order: [String] = []
+        switch mode {
+        case "device": if local { order = ["local"] }
+        case "judge0": order = (online ? ["judge0"] : []) + (local ? ["local"] : [])
+        default: order = (local ? ["local"] : []) + (online ? ["judge0"] : [])
+        }
+        var errors: [String] = []
+        for how in order {
+            do {
+                if how == "local" { progress("Running on this device…"); return .report(try await Engine.shared.runLocal(m, code: code), how: "local") }
+                progress("Running on Judge0…")
+                return .report(try await Engine.shared.run(m, code: code, settings: settings), how: "judge0")
+            } catch { errors.append((how == "local" ? "on device: " : "Judge0: ") + error.localizedDescription) }
+        }
+        if !errors.isEmpty { return .unreachable(errors.joined(separator: "; ")) }
+        if !online { return .unreachable("you're offline") }
+        return .unreachable(mode == "device" ? "on-device only mode, and the app can't run this language itself" : "no engine available")
+    }
+    /// Ranks cleared on structure checks alone (offline), waiting for a real run.
+    var pendingVerify: [Mission] {
+        CUR.missions.filter { s.done.contains($0.id) && s.verified[$0.id] == "offline" && $0.ciOnly == nil && s.code[$0.id] != nil }
+    }
+    @discardableResult func reverify(auto: Bool) async -> (ok: Int, failed: [String], skipped: Int) {
+        guard !reverifying else { return (0, [], 0) }
+        reverifying = true; defer { reverifying = false }
+        var ok = 0, failed: [String] = [], skipped = 0
+        let list = pendingVerify.filter { !(auto && reverifyFailed.contains($0.id)) }
+        for m in list {
+            switch await checkpoints(m, code: s.code[m.id] ?? m.starter) {
+            case .unreachable: skipped += 1
+            case .report(let rep, let how):
+                if rep.passed == true { s.verified[m.id] = how; ok += 1 } else { failed.append(m.id); reverifyFailed.insert(m.id) }
+                if how == "judge0" { try? await Task.sleep(for: .milliseconds(1500)) }   // go easy on the public instance
+            }
+        }
+        if ok > 0 || !auto { flash("Re-verified \(ok)/\(list.count)" + (failed.isEmpty ? "" : " · \(failed.count) need fixes") + (skipped > 0 ? " · \(skipped) still offline" : "")) }
+        return (ok, failed, skipped)
+    }
+
     func flash(_ t: String) { toast = t; Task { try? await Task.sleep(for: .seconds(2.4)); if toast == t { toast = nil } } }
 }
 
 func verLabel(_ v: String?) -> String {
-    switch v { case "judge0": return "verified · Judge0"; case "local": return "verified · local"; case "ci": return "pending · GitHub Actions"; default: return "structure only" }
+    switch v { case "judge0": return "verified · Judge0"; case "local": return "verified · on device"; case "ci": return "pending · GitHub Actions"; default: return "structure only · re-verify online" }
 }

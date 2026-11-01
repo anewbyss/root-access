@@ -72,6 +72,7 @@
         praxis: { stages: RA.PRAXIS.stages, selfExplain: RA.PRAXIS.selfExplain, fadeAfter: RA.PRAXIS.fadeAfter,
           evidence: RA.PRAXIS.evidence.map(function (e) { return { claim: e.claim, source: src(e.src) }; }) },
         judge0: RA.judge0Hosts,
+        local: (function () { var o = {}; Object.keys(RA.LOCAL || {}).forEach(function (k) { o[k] = RA.LOCAL[k].kind; }); return o; })(),
         orient: (function () { var o = {}; Object.keys(RA.ORIENT).forEach(function (k) { var x = RA.ORIENT[k];
           o[k] = { run: strip(x.run), file: strip(x.file), out: strip(x.out), comment: strip(x.comment), gotchas: x.gotchas.map(strip) }; }); return o; })()
       });
@@ -90,6 +91,15 @@
     explain: function (id, resultJSON) { return strip(RA.explain(BY[id], JSON.parse(resultJSON))); },
     joinPieces: function (partsJSON) { return RA.joinPieces(JSON.parse(partsJSON)); },
     request: function (id, code, cfg) { return JSON.stringify(RA.judge0Request(BY[id], code, JSON.parse(cfg || "{}"))); },
+    // On-device runs (see curriculum/_local.js): compose, then report in the same shape as finish().
+    localPlan: function (id, code) { var p = RA.localPlan(BY[id], code); return JSON.stringify(p ? { kind: p.kind, src: p.src } : { kind: "none", src: "" }); },
+    jsShim: function () { return RA.JS_SHIM; },
+    localFinish: function (id, stdout, status, stderr) {
+      var rep = RA.localFinish(BY[id], stdout, status, stderr);
+      rep.passed = RA.allPassed(rep);
+      delete rep.compile;
+      return JSON.stringify(rep);
+    },
     finish: function (id, req, resp, code) {
       var rep = RA.judge0Finish(BY[id], JSON.parse(req), JSON.parse(resp), code);
       rep.passed = RA.allPassed(rep);

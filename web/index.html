@@ -2,13 +2,23 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<script>
+// Applies saved display prefs before first paint (no flash of the wrong theme). The rest lives in app.js.
+try { var p = JSON.parse(localStorage.getItem("rootaccess.prefs") || "{}"), d = document.documentElement;
+  ["scheme", "contrast", "font", "density", "layout", "rain", "motion", "width"].forEach(function (k) { if (p[k] && p[k] !== "system") d.dataset[k] = p[k]; });
+  if (p.scheme === "light" || p.scheme === "dark") document.querySelector('meta[name="color-scheme"]').content = p.scheme;
+  if (p.scale) d.style.setProperty("--scale", p.scale / 100); if (p.editorSize) d.style.setProperty("--ed", p.editorSize + "px");
+  if (p.accentHex) d.style.setProperty("--acc", p.accentHex);
+} catch (e) {}
+</script>
 <title>ROOT//ACCESS: learn to code by jacking in</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22%3E%3Crect width=%2216%22 height=%2216%22 fill=%22%23030806%22/%3E%3Ctext x=%223%22 y=%2213%22 font-size=%2212%22 fill=%22%233dff7a%22 font-family=%22monospace%22%3E%3E%3C/text%3E%3C/svg%3E">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#030806">
 <meta name="description" content="A narrative hacking game that teaches 12 programming languages to fluency, starting from zero experience, with checkpoints graded by real compilers.">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;800&family=Chakra+Petch:wght@500;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -21,18 +31,19 @@
       <button data-view="intel">Intel</button>
       <button data-view="pet">Code Pet</button>
       <button data-view="backup">Backup</button>
-      <button data-view="settings">Engines</button>
+      <button data-view="settings">Settings</button>
     </nav>
     <div class="hud" id="hud"></div>
   </header>
   <main id="view"></main>
-  <footer class="foot mut">Checkpoints run on <a href="https://ce.judge0.com/" target="_blank" rel="noopener">Judge0</a> in your browser and on current toolchains in GitHub Actions. Progress lives in this session: back it up.</footer>
+  <footer class="foot mut">Works offline once loaded. Python, Boot Camp, SQL, JavaScript and TypeScript checkpoints can run on this device; every language runs on <a href="https://ce.judge0.com/" target="_blank" rel="noopener">Judge0</a> when you're online and on current toolchains in GitHub Actions. Progress saves in this browser: back it up to move devices.</footer>
 </div>
 <div id="toast" role="status" aria-live="polite"></div>
 <script src="curriculum/_core.js"></script>
 <script src="curriculum/_world.js"></script>
 <script src="curriculum/_dossiers.js"></script>
 <script src="curriculum/_engine.js"></script>
+<script src="curriculum/_local.js"></script>
 <script src="curriculum/basics.js"></script>
 <script src="curriculum/python.js"></script>
 <script src="curriculum/javascript.js"></script>
@@ -51,6 +62,7 @@
 <script src="curriculum/checkpoints.js"></script>
 <script src="curriculum/solutions.js"></script>
 <script src="zip.js"></script>
+<script src="runner.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

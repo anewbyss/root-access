@@ -7,12 +7,29 @@ const LANG_ORDER = RA.LANG_ORDER;                       // Boot Camp first, then
 const LANGS12 = LANG_ORDER.filter((L) => !RA.isTrack(L)); // real languages (counted for fluency, dossiers)
 const EXT = { basics: "py", python: "py", javascript: "js", typescript: "ts", sql: "sql", bash: "sh", go: "go", rust: "rs", swift: "swift", kotlin: "kt", java: "java", csharp: "cs", cpp: "cpp" };
 const BYID = Object.fromEntries(RA.missions.map((m) => [m.id, m]));
-const LOCAL_LANGS = { javascript: 1, typescript: 1 }; // can run in the browser if Judge0 is unreachable
+const RL = window.RALocal;
 
-// Preview hosting blocks browser storage, so state lives in memory; backups carry it between sessions.
+// Progress persists in this browser (localStorage). If storage is blocked (private mode, disabled site data),
+// it falls back to memory and the Backup screen says so. Snapshots are trimmed first if the quota fills up.
 const mem = {};
-const store = { get: (k) => mem[k] ?? null, set: (k, v) => { mem[k] = v; } };
-const KEY = "rootaccess.save", SNAP = "rootaccess.snapshots";
+const store = (() => {
+  let ls = null;
+  try { const t = "__ra_probe"; localStorage.setItem(t, t); localStorage.removeItem(t); ls = localStorage; } catch (e) {}
+  return {
+    persistent: !!ls,
+    get: (k) => { try { return ls ? ls.getItem(k) : mem[k] ?? null; } catch (e) { return mem[k] ?? null; } },
+    set: (k, v) => {
+      mem[k] = v;
+      if (!ls) return true;
+      try { ls.setItem(k, v); return true; }
+      catch (e) {
+        if (k !== SNAP) try { const snaps = JSON.parse(ls.getItem(SNAP) || "[]"); if (snaps.length) { ls.setItem(SNAP, JSON.stringify(snaps.slice(0, Math.floor(snaps.length / 2)))); ls.setItem(k, v); return true; } } catch (e2) {}
+        return false;
+      }
+    }
+  };
+})();
+const KEY = "rootaccess.save", SNAP = "rootaccess.snapshots", PREFS = "rootaccess.prefs";
 
 const fresh = () => ({
   format: "rootaccess-save", version: 2, faction: null, xp: 0,
@@ -20,14 +37,24 @@ const fresh = () => ({
   verified: {},        // id -> "judge0" | "ci" (pending GitHub Actions) | "local" | "offline"
   code: {}, fails: {}, primm: {}, notes: {}, hints: {}, legacy: {},
   pet: { name: "NULL", color: "matrix", eyes: "dot", crown: "none", aura: "none", energy: 70, bond: 10 },
-  settings: { ce: RA.judge0Hosts.ce, extra: RA.judge0Hosts.extra, token: "", tokenHeader: "X-Auth-Token" },
+  // mode: "auto" (on-device when the pack is ready, else Judge0) | "judge0" (Judge0 first) | "device" (never send code out)
+  settings: { ce: RA.judge0Hosts.ce, extra: RA.judge0Hosts.extra, token: "", tokenHeader: "X-Auth-Token",
+    mode: "auto", offlineClears: true, autoReverify: true, packBase: {} },
+  prefs: defaultPrefs(),
   updated: Date.now()
 });
+// Display preferences. Shared field names with the Swift app (it ignores the web-only ones).
+function defaultPrefs() {
+  return { scheme: "system", accent: "faction", accentHex: "", customAccent: "#3dff7a", contrast: "system", font: "mono", scale: 100,
+    editorSize: 13, density: "normal", layout: "side", width: "normal", rain: "on", motion: "system", typewriter: true };
+}
+const ACCENTS = { matrix: "#3dff7a", ice: "#5ad1ff", violet: "#c79bff", ember: "#ff8a4c", gold: "#ffd84d", rose: "#ff6fae", white: "#f2f2f2" };
 // Accepts v1 saves (23-mission prototype) and v2. Unknown mission ids are kept under `legacy` so nothing is lost.
 function migrate(d) {
   const s = Object.assign(fresh(), d);
   s.pet = Object.assign(fresh().pet, d.pet || {});
   s.settings = Object.assign(fresh().settings, d.settings || {});
+  s.prefs = Object.assign(defaultPrefs(), d.prefs || {});
   s.legacy = Object.assign({}, d.legacy || {});
   const keep = [], gone = [];
   (Array.isArray(d.done) ? d.done : []).forEach((id) => (BYID[id] ? keep : gone).push(id));
@@ -41,9 +68,24 @@ function migrate(d) {
   s.version = 2;
   return s;
 }
-let S = fresh();
-let ui = { view: "missions", lang: "basics", mission: null, intel: "languages", intelLang: "python" };
-function save() { S.updated = Date.now(); store.set(KEY, JSON.stringify(S)); hud(); }
+function load() {
+  try { const raw = store.get(KEY); if (raw) { const d = JSON.parse(raw); if (d && d.format === "rootaccess-save") return migrate(d); } } catch (e) {}
+  return fresh();
+}
+let S = load();
+let ui = { view: "missions", lang: "basics", mission: null, intel: "languages", intelLang: "python", set: "display" };
+let saveOk = true;
+function save() {
+  S.updated = Date.now();
+  const ok = store.set(KEY, JSON.stringify(S));
+  if (!ok && saveOk) toast("Browser storage is full. Download a backup from Backup.");
+  saveOk = ok; hud();
+}
+// Another tab saved: adopt its state unless you're mid-edit here.
+addEventListener("storage", (e) => {
+  if (e.key !== KEY || !e.newValue) return;
+  try { const d = JSON.parse(e.newValue); if ((d.updated || 0) <= S.updated) return; S = migrate(d); applyPrefs(); if (!document.activeElement || !/TEXTAREA|INPUT/.test(document.activeElement.tagName)) render(); } catch (err) {}
+});
 function snapshot(label) {
   let snaps = []; try { snaps = JSON.parse(store.get(SNAP)) || []; } catch (e) {}
   snaps.unshift({ at: Date.now(), label, data: JSON.parse(JSON.stringify(S)) });
@@ -65,36 +107,83 @@ function download(name, blob) {
 const src = (k) => RA.SOURCES[k];
 const cite = (k) => { const s = src(k); return s ? `<a href="${s.url}" target="_blank" rel="noopener">${esc(s.label)}</a>` : ""; };
 
+// ---------- display prefs ----------
+const ROOT = document.documentElement;
+const reduceMotion = () => S.prefs.motion === "reduce" || (S.prefs.motion !== "full" && matchMedia("(prefers-reduced-motion: reduce)").matches);
+function accentHex() {
+  const p = S.prefs;
+  if (p.accent === "custom" && /^#[0-9a-f]{6}$/i.test(p.customAccent)) return p.customAccent;
+  return ACCENTS[p.accent] || (S.faction ? F().color : ACCENTS.matrix);
+}
+// Mirrors prefs onto <html data-*> (style.css keys off these) and into a small key the inline <head> script reads.
+function applyPrefs() {
+  const p = S.prefs;
+  ["scheme", "contrast", "font", "density", "layout", "rain", "motion", "width"].forEach((k) => { if (p[k] && p[k] !== "system") ROOT.dataset[k] = p[k]; else delete ROOT.dataset[k]; });
+  $('meta[name="color-scheme"]').content = p.scheme === "light" || p.scheme === "dark" ? p.scheme : "light dark";
+  ROOT.style.setProperty("--scale", (+p.scale || 100) / 100);
+  ROOT.style.setProperty("--ed", (+p.editorSize || 13) + "px");
+  p.accentHex = accentHex();
+  ROOT.style.setProperty("--acc", p.accentHex);
+  const dark = p.scheme === "dark" || (p.scheme !== "light" && matchMedia("(prefers-color-scheme: dark)").matches);
+  const tc = $('meta[name="theme-color"]'); if (tc) tc.content = dark ? "#030806" : "#f3f6f1";
+  store.set(PREFS, JSON.stringify(p));
+  rain.restart();
+}
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => applyPrefs());
+
 // ---------- code rain ----------
-(function rain() {
-  const c = $("#rain"), x = c.getContext("2d"), glyphs = "アイウエオカキクケコｱｲｳ01{}<>/=;$#λ";
-  let drops; const fs = 16;
+// Fades old glyphs to transparent (not to a fixed colour), so it works over light and dark themes.
+const rain = (() => {
+  const c = $("#rain"), x = c.getContext("2d"), glyphs = "アイウエオカキクケコｱｲｳ01{}<>/=;$#λ", fs = 16;
+  let drops = [], timer = 0;
   const size = () => { c.width = innerWidth; c.height = innerHeight; drops = Array(Math.ceil(c.width / fs)).fill(0).map(() => Math.random() * -50); };
-  size(); addEventListener("resize", size);
-  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
   function tick() {
-    x.fillStyle = "rgba(3,8,6,.09)"; x.fillRect(0, 0, c.width, c.height);
-    x.fillStyle = getComputedStyle(document.documentElement).getPropertyValue("--acc") || "#3dff7a"; x.font = fs + "px JetBrains Mono";
+    x.globalCompositeOperation = "destination-out"; x.fillStyle = "rgba(0,0,0,.09)"; x.fillRect(0, 0, c.width, c.height);
+    x.globalCompositeOperation = "source-over";
+    x.fillStyle = getComputedStyle(ROOT).getPropertyValue("--acc").trim() || "#3dff7a"; x.font = fs + "px ui-monospace, monospace";
     drops.forEach((d, i) => { x.fillText(glyphs[(Math.random() * glyphs.length) | 0], i * fs, d * fs); drops[i] = d * fs > c.height && Math.random() > 0.975 ? 0 : d + 1; });
-    if (!reduce) setTimeout(() => requestAnimationFrame(tick), 60);
   }
-  tick();
+  function restart() {
+    clearInterval(timer); timer = 0;
+    if (S.prefs.rain === "off") { x.clearRect(0, 0, c.width, c.height); return; }
+    if (reduceMotion()) { x.clearRect(0, 0, c.width, c.height); for (let i = 0; i < 40; i++) tick(); return; } // one still frame
+    if (!document.hidden) timer = setInterval(() => requestAnimationFrame(tick), S.prefs.rain === "low" ? 140 : 60);
+  }
+  size(); addEventListener("resize", () => { size(); restart(); });
+  document.addEventListener("visibilitychange", () => restart());
+  return { restart };
 })();
+
+// ---------- network / offline ----------
+let online = navigator.onLine;
+addEventListener("online", () => { online = true; hud(); if (S.faction && S.settings.autoReverify && pendingVerify().length) reverify(true); });
+addEventListener("offline", () => { online = false; hud(); toast("Offline. Missions keep working; see Settings → Offline"); });
+if ("serviceWorker" in navigator && /^https?:$/.test(location.protocol)) {
+  const hadController = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.register("sw.js").catch(() => {});
+  navigator.serviceWorker.addEventListener("controllerchange", () => { if (hadController) toast("Update installed. Reload to use the new version."); });
+}
 
 // ---------- HUD / nav ----------
 function hud() {
-  if (S.faction) document.documentElement.style.setProperty("--acc", F().color);
+  if (S.prefs.accentHex !== accentHex()) applyPrefs();
   const langsDone = LANGS12.filter((L) => fluency(L) === 12).length;
-  $("#hud").innerHTML = S.faction ? `<span>${F().short}</span><span>LVL <b>${level()}</b></span><div class="bar" title="XP to next level"><i style="width:${lvlProgress() * 100}%"></i></div><span><b>${S.xp}</b> XP</span><span title="Missions cleared"><b>${S.done.length}</b>/${RA.missions.length}</span>${langsDone ? `<span title="Languages at full fluency"><b>${langsDone}</b> fluent</span>` : ""}` : "";
+  const pend = S.faction ? pendingVerify().length : 0;
+  $("#hud").innerHTML = (S.faction ? `<span>${F().short}</span><span>LVL <b>${level()}</b></span><div class="bar" title="XP to next level"><i style="width:${lvlProgress() * 100}%"></i></div><span><b>${S.xp}</b> XP</span><span title="Missions cleared"><b>${S.done.length}</b>/${RA.missions.length}</span>${langsDone ? `<span title="Languages at full fluency"><b>${langsDone}</b> fluent</span>` : ""}` : "")
+    + `<span class="net ${online ? "" : "off"}" title="${online ? "Online: Judge0 available" : "Offline: on-device runners and structure checks"}${pend ? ` · ${pend} rank${pend === 1 ? "" : "s"} waiting to re-verify` : ""}">${online ? "● online" : "○ offline"}${pend ? ` · ${pend}↻` : ""}</span>`;
   $("#nav").style.visibility = S.faction ? "visible" : "hidden";
   document.querySelectorAll("#nav button").forEach((b) => b.classList.toggle("on", b.dataset.view === ui.view));
 }
 $("#nav").addEventListener("click", (e) => { const v = e.target.closest("button")?.dataset.view; if (v) { ui.view = v; ui.mission = null; render(); } });
+let lastPlace = "";
 function render() {
   hud(); const v = $("#view"); v.onclick = null;
-  if (!S.faction) return intro(v);
+  if (!S.faction && ui.view !== "backup") return intro(v);
   ({ missions, intel, pet, backup, settings })[ui.view](v);
-  scrollTo(0, 0);
+  // Only jump to the top when you actually go somewhere, not when a setting or pet option re-renders the view.
+  const place = ui.view + "/" + (ui.mission || "") + "/" + ui.lang + "/" + ui.intel;
+  if (place !== lastPlace) scrollTo(0, 0);
+  lastPlace = place;
 }
 
 // ---------- intro ----------
@@ -104,13 +193,13 @@ function intro(v) {
     Object.entries(RA.FACTIONS).map(([k, f]) => `<button class="fcard panel" data-f="${k}" style="--acc:${f.color}"><span class="tag acc">${f.short}</span><h3>${esc(f.name)}</h3><q>“${esc(f.creed)}”</q><span class="mut">${esc(f.pitch)}</span><span class="mut">Handler: ${esc(f.handler)}</span></button>`).join("")
   }</div><p class="mut" style="margin-top:16px">Already have a save? <button data-restore>Restore a backup</button></p></div></section>`;
   const msg = "Wake up.\n\nThe world runs on code you can't read. Pipelines, hospitals, elections, gods.\nIn 2021 one leaked password shut down a fuel pipeline. In 2024 one bad update crashed 8.5 million machines.\n\nThree factions want you. Each will teach you to read the code, and to write it.\nEvery mission ends at a checkpoint graded by a real compiler.\n\nFollow the white cursor.";
-  let i = 0; const el = $("#type");
+  let i = S.prefs.typewriter && !reduceMotion() ? 0 : msg.length; const el = $("#type");
   const step = () => { el.textContent = msg.slice(0, i++) + "█"; if (i <= msg.length) setTimeout(step, msg[i - 1] === "\n" ? 120 : 14); else { el.textContent = msg; $("#pick").hidden = false; } };
   step(); el.onclick = () => { i = msg.length; };
   v.onclick = (e) => {
     const f = e.target.closest("[data-f]")?.dataset.f;
     if (f) { S.faction = f; save(); toast(`Welcome to ${RA.FACTIONS[f].name}`); render(); }
-    if (e.target.closest("[data-restore]")) { S.faction = "sentinel"; ui.view = "backup"; render(); }
+    if (e.target.closest("[data-restore]")) { ui.view = "backup"; render(); }
   };
 }
 
@@ -122,11 +211,11 @@ function missions(v) {
     const d = fluency(k);
     return `${k === "basics" ? '<p class="tiny acc">START HERE</p>' : k === LANGS12[0] ? '<p class="tiny mut" style="margin-top:10px">LANGUAGES</p>' : ""}<button data-lang="${k}" class="${k === L ? "on" : ""}"><span>${esc(RA.langs[k].name)}</span><span class="mini"><i style="width:${(d / 12) * 100}%"></i></span><span class="mut">${d}/12</span></button>`; }).join("")}</div></aside>
   <section>${L !== "basics" && fluency("basics") < 12 ? `<div class="panel banner"><b>New to coding?</b> Start with <b>Boot Camp</b>: 12 short missions that assume no experience and teach the core ideas every language shares. <button data-lang="basics">Open Boot Camp</button></div>` : ""}<div class="panel lhead"><div><p class="mut">${esc(F().handler)} // ${esc(F().name)}</p><h2>${esc(lang.name)}</h2><p>${esc(D ? D.tagline : lang.why)}</p><p class="mut">${esc(lang.why)}</p>
-    <div class="row">${D ? `<button data-intel="${L}">Read the ${esc(lang.name)} dossier</button>` : ""}<span class="chip">Engine: ${esc(RA.ENGINES[L].label)}</span><span class="chip">CI: ${esc(RA.CI_TOOLCHAINS[L])}</span></div></div>
+    <div class="row">${D ? `<button data-intel="${L}">Read the ${esc(lang.name)} dossier</button>` : ""}<span class="chip">Engine: ${esc(RA.ENGINES[L].label)}</span>${RA.LOCAL[L] ? `<span class="chip dev" title="Runs with no network once its pack is downloaded (Settings → Offline)">Offline: ${esc(RA.LOCAL[L].label)}</span>` : `<span class="chip" title="Offline, ranks clear on structure checks and re-verify on Judge0 later">Offline: structure checks</span>`}<span class="chip">CI: ${esc(RA.CI_TOOLCHAINS[L])}</span></div></div>
     <div class="fluency" aria-label="Fluency ${n} of 12"><svg viewBox="0 0 120 120"><circle cx="60" cy="60" r="50" class="trk"/><circle cx="60" cy="60" r="50" class="val" style="stroke-dasharray:${(n / 12) * 314} 314"/></svg><div><b>${n}</b>/12</div><span class="mut">fluency</span></div></div>
   ${n === 12 ? certificate(L) : ""}
   <div class="mlist">${list.map((m) => { const ok = unlocked(m), dn = isDone(m.id), meta = metaFor(m), ver = S.verified[m.id];
-    return `<button class="mcard panel ${dn ? "done" : ""}" data-m="${m.id}" ${ok ? "" : "disabled"}><div><div class="mut tiny">RANK ${m.rank} // ${esc(m.module)}${m.rank === 12 ? " // CAPSTONE" : ""}</div><h3>${esc(m.title)}</h3><div class="mut">${esc(RA.brief(m, S.faction))}</div></div><div class="cstack"><span class="chip">${dn ? "CLEARED" : ok ? "+" + m.xp + " XP" : "LOCKED"}</span><span class="chip ${meta.ciOnly ? "ci" : ""}">${meta.ciOnly ? "GitHub Actions" : "Judge0"}</span>${dn ? `<span class="chip ${ver === "judge0" || ver === "local" ? "ok" : ""}">${verLabel(ver)}</span>` : ""}</div></button>`; }).join("")}</div></section></div>`;
+    return `<button class="mcard panel ${dn ? "done" : ""}" data-m="${m.id}" ${ok ? "" : "disabled"}><div><div class="mut tiny">RANK ${m.rank} // ${esc(m.module)}${m.rank === 12 ? " // CAPSTONE" : ""}</div><h3>${esc(m.title)}</h3><div class="mut">${esc(RA.brief(m, S.faction))}</div></div><div class="cstack"><span class="chip">${dn ? "CLEARED" : ok ? "+" + m.xp + " XP" : "LOCKED"}</span><span class="chip ${meta.ciOnly ? "ci" : ""}">${meta.ciOnly ? "GitHub Actions" : RA.LOCAL[m.lang] ? "Judge0 · on device" : "Judge0"}</span>${dn ? `<span class="chip ${ver === "judge0" || ver === "local" ? "ok" : ""}">${ver === "judge0" || ver === "local" ? "✓ " : ""}${verLabel(ver)}</span>` : ""}</div></button>`; }).join("")}</div></section></div>`;
   v.onclick = (e) => {
     const l = e.target.closest("[data-lang]")?.dataset.lang; if (l) { ui.lang = l; render(); return; }
     const m = e.target.closest("[data-m]")?.dataset.m; if (m) { ui.mission = m; render(); return; }
@@ -134,7 +223,7 @@ function missions(v) {
     if (e.target.closest("[data-cert]")) downloadCert(e.target.closest("[data-cert]").dataset.cert);
   };
 }
-const verLabel = (v) => ({ judge0: "verified · Judge0", local: "verified · in browser", ci: "pending · GitHub Actions", offline: "structure only" }[v] || "structure only");
+const verLabel = (v) => ({ judge0: "verified · Judge0", local: "verified · on device", ci: "pending · GitHub Actions", offline: "structure only · re-verify online" }[v] || "structure only · re-verify online");
 
 function certificate(L) {
   const pend = langMissions(L).filter((m) => S.verified[m.id] === "ci" || S.verified[m.id] === "offline").map((m) => m.id);
@@ -149,7 +238,7 @@ function downloadCert(L) {
 }
 
 // ---------- mission ----------
-const BOOT_INTRO = `<p>You don't need any coding experience. Each mission has the same parts:</p><ol class="steps"><li><b>Training</b> explains one idea in plain words, with a tiny example.</li><li><b>Objective</b> says exactly what your code must do.</li><li><b>Step by step</b> tells you what to type, one line at a time.</li><li>The <b>Terminal</b> on the right is where you type. Lines starting with <code>#</code> are notes for you; the computer skips them.</li><li><b>Requirements</b> tick green as you type the right pieces. When they're all green, press <b>Run external checkpoints</b>: your code is sent to a real Python engine and tested.</li><li>If a checkpoint fails, it tells you what it means. If you're stuck, the <b>hint ladder</b> goes from a nudge, to the answer's lines shuffled, to the full answer.</li></ol><p class="mut">Boot Camp uses Python because it reads closest to plain English. Everything you learn here (variables, decisions, loops, lists, functions, reading errors) carries over to every other language.</p>`;
+const BOOT_INTRO = `<p>You don't need any coding experience. Each mission has the same parts:</p><ol class="steps"><li><b>Training</b> explains one idea in plain words, with a tiny example.</li><li><b>Objective</b> says exactly what your code must do.</li><li><b>Step by step</b> tells you what to type, one line at a time.</li><li>The <b>Terminal</b> on the right is where you type. Lines starting with <code>#</code> are notes for you; the computer skips them.</li><li><b>Requirements</b> tick green as you type the right pieces. When they're all green, press <b>Run checkpoints</b>: a real Python engine runs your code against tests (on this device once the offline pack is downloaded, otherwise on Judge0).</li><li>If a checkpoint fails, it tells you what it means. If you're stuck, the <b>hint ladder</b> goes from a nudge, to the answer's lines shuffled, to the full answer.</li></ol><p class="mut">Boot Camp uses Python because it reads closest to plain English. Everything you learn here (variables, decisions, loops, lists, functions, reading errors) carries over to every other language.</p>`;
 function missionView(v, m) {
   if (!m) { ui.mission = null; return missions(v); }
   const code = S.code[m.id] ?? m.starter, meta = metaFor(m), P = RA.PRAXIS, stage = S.primm[m.id] || 0;
@@ -160,7 +249,7 @@ function missionView(v, m) {
   let lastRep = null, pz = null;
   const seen = () => S.hints[m.id] || 0;
   const canFull = () => seen() >= 2 || (S.fails[m.id] || 0) >= P.fadeAfter || isDone(m.id);
-  v.innerHTML = `<div class="row"><button id="back">← ${esc(RA.langs[m.lang].name)} board</button>${next && isDone(m.id) ? `<button data-go="${next.id}">Next: rank ${next.rank} →</button>` : ""}</div>
+  v.innerHTML = `<div class="mission"><div class="row"><button id="back">← ${esc(RA.langs[m.lang].name)} board</button>${next && isDone(m.id) ? `<button data-go="${next.id}">Next: rank ${next.rank} →</button>` : ""}</div>
   <div class="panel mhead"><p class="mut">${esc(RA.langs[m.lang].name.toUpperCase())} // RANK ${m.rank} OF 12 // ${esc(m.module)}</p><h1>${esc(m.title)}</h1><p><b class="acc">${esc(F().handler)}:</b> ${esc(RA.brief(m, S.faction))}</p></div>
   <div class="cols"><div class="panel lesson">
     <ol class="primm" aria-label="PRIMM stages">${P.stages.map((s, i) => `<li><button data-stage="${i}" class="${i === stage ? "on" : i < stage ? "past" : ""}">${s.name}</button></li>`).join("")}</ol>
@@ -173,16 +262,20 @@ function missionView(v, m) {
     ${steps.length ? `<h3>Step by step</h3><ol class="steps" id="steps">${steps.map((x, i) => `<li data-step="${i}">${x}</li>`).join("")}</ol>` : ""}
     <p class="mut tiny">Stuck? Use the hint ladder under the editor: <b>1</b> points at your next move, <b>2</b> gives you the answer's lines to put in order, <b>3</b> shows the full answer for this mission.</p>
   </div>
-  <div class="panel"><div class="row between"><h3>Terminal</h3><span class="mut tiny">Ctrl/Cmd+Enter runs checkpoints</span></div>
+  <div class="panel"><div class="row between"><h3>Terminal</h3><span class="mut tiny">Ctrl/Cmd+Enter runs · Esc then Tab leaves the editor</span></div>
     <textarea class="editor" id="ed" spellcheck="false" autocapitalize="off" aria-label="Code editor">${esc(code)}</textarea>
-    <div class="row" style="margin:10px 0"><button class="primary" id="run">${meta.ciOnly ? "Check and queue for GitHub Actions" : "Run external checkpoints"}</button><button id="struct">Check structure</button><button id="reset">Reset</button>${meta.ciOnly ? `<button id="export1">Export ${m.id}.${EXT[m.lang]}</button>` : ""}</div>
+    <div class="row" style="margin:10px 0"><button class="primary" id="run">${meta.ciOnly ? "Check and queue for GitHub Actions" : "Run checkpoints"}</button><button id="struct">Check structure</button><button id="reset">Reset</button>${meta.ciOnly ? `<button id="export1">Export ${m.id}.${EXT[m.lang]}</button>` : ""}</div>
     <div class="req"><p class="tiny mut">REQUIREMENTS // update as you type</p><ul id="req"></ul></div>
     <div class="hintbar row"><span class="tiny mut">HINTS</span><button data-tier="1">1 · Next move</button><button data-tier="2">2 · Unscramble the answer</button><button data-tier="3">3 · Full answer</button></div>
     <div class="hintbox" id="hintbox" hidden></div>
     <div class="cplist" id="cps">${checkpointList(m, meta)}</div>
-    <div class="term" id="out"><span class="mut">&gt; awaiting input_</span></div></div></div>`;
+    <div class="term" id="out" aria-live="polite"><span class="mut">&gt; awaiting input_</span></div></div></div></div>`;
   const ed = $("#ed"), out = $("#out");
+  let tabOut = false; // Esc releases Tab so keyboard users can leave the editor
   ed.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") { tabOut = true; return; }
+    if (e.key === "Tab" && tabOut) { tabOut = false; return; }
+    tabOut = false;
     if (e.key === "Tab") { e.preventDefault(); const s = ed.selectionStart; ed.setRangeText("    ", s, ed.selectionEnd, "end"); }
     if ((e.metaKey || e.ctrlKey) && e.key === "Enter") $("#run").click();
   });
@@ -257,21 +350,26 @@ function missionView(v, m) {
       out.innerHTML = `<span class="mut">STRUCTURE</span>\n${s.lines.join("\n")}\n\n<span class="acc">QUEUED FOR GITHUB ACTIONS.</span> ${esc(meta.ciOnly)}\nExport this file (or all submissions from Backup), commit it to <code>submissions/</code>, and the checkpoints workflow grades it on ${esc(RA.CI_TOOLCHAINS[m.lang])}.`;
       clear("ci"); return;
     }
-    btn.disabled = true; btn.textContent = "Running on Judge0…";
-    out.innerHTML = `<span class="mut">&gt; submitting to ${esc(RA.ENGINES[m.lang].label)}…</span>`;
-    let rep, how = "judge0";
-    try { rep = await RA.runJudge0(m, code, judgeCfg()); }
-    catch (err) {
-      if (LOCAL_LANGS[m.lang]) { try { rep = await localRun(m, code); how = "local"; } catch (e2) { rep = null; } }
-      if (!rep) { btn.disabled = false; btn.textContent = "Run external checkpoints"; out.innerHTML = `<span class="bad">Couldn't reach Judge0</span> (${esc(err.message)}). The public instance is rate-limited. Wait a minute, or add your own Judge0 host or API key under Engines.\n\n<span class="mut">Structure checks passed, so you can export this file and verify it in GitHub Actions instead.</span>`; return; }
+    btn.disabled = true;
+    const say = (msg) => { btn.textContent = msg; out.innerHTML = `<span class="mut">&gt; ${esc(msg)}</span>`; };
+    let r;
+    try { r = await checkpoints(m, code, say); } finally { btn.disabled = false; btn.textContent = "Run checkpoints"; }
+    if (r.offline) {
+      if (S.settings.offlineClears) {
+        out.innerHTML = `<span class="mut">STRUCTURE</span>\n${s.lines.join("\n")}\n\n<span class="acc">NO ENGINE REACHABLE</span> <span class="mut">(${esc(r.reason)})</span>\nThe required pieces are all present, so this rank clears as <b>structure only</b> and the next one unlocks. It re-runs on real checkpoints when you're back online (Settings → Offline).`;
+        clear("offline");
+      } else {
+        out.innerHTML = `<span class="bad">No engine reachable</span> (${esc(r.reason)}). The public Judge0 is rate-limited: wait a minute, add your own host under Settings → Engines${RA.LOCAL[m.lang] ? ", or download this track's offline pack under Settings → Offline" : ""}.\n\n<span class="mut">Structure checks passed, so you can also export this file and verify it in GitHub Actions.</span>`;
+      }
+      return;
     }
-    btn.disabled = false; btn.textContent = "Run external checkpoints";
+    const rep = r.rep, how = r.how;
     lastRep = rep;
     $("#cps").innerHTML = checkpointList(m, meta, rep.results);
     const ok = RA.allPassed(rep);
     const lines = rep.results.map((r) => `<span class="${r.status === "PASS" ? "ok" : r.status === "SKIP" ? "mut" : "bad"}">${r.status === "PASS" ? "[✓]" : r.status === "SKIP" ? "[~]" : "[✗]"}</span> ${esc(r.label)}${r.status !== "PASS" && r.detail ? ` <span class="mut">— ${esc(r.detail)}</span>` : ""}`);
     const user = (rep.stdout || "").split("\n").filter((l) => l && !/::cp::/.test(l)).slice(0, 12).join("\n");
-    out.innerHTML = `<span class="mut">${how === "local" ? "IN-BROWSER FALLBACK (Judge0 unreachable)" : "ENGINE // " + esc(rep.engine || RA.ENGINES[m.lang].label)}${rep.time ? " · " + rep.time + "s" : ""}</span>\n${lines.join("\n")}${user ? `\n\n<span class="mut">stdout</span>\n${esc(user)}` : ""}${rep.stderr && !ok ? `\n\n<span class="mut">stderr</span>\n${esc(rep.stderr.slice(0, 600))}` : ""}`;
+    out.innerHTML = `<span class="mut">${how === "local" ? "ON DEVICE" : "ENGINE"} // ${esc(rep.engine || RA.ENGINES[m.lang].label)}${rep.time ? " · " + rep.time + "s" : ""}</span>\n${lines.join("\n")}${user ? `\n\n<span class="mut">stdout</span>\n${esc(user)}` : ""}${rep.stderr && !ok ? `\n\n<span class="mut">stderr</span>\n${esc(rep.stderr.slice(0, 600))}` : ""}`;
     if (ok) clear(how); else { fail(); out.insertAdjacentHTML("beforeend", `\n\n<span class="bad">ACCESS DENIED.</span> Each failing checkpoint above has a plain-English explanation. Fix the first one and run again.`); }
   };
   function fail() {
@@ -291,7 +389,7 @@ function missionView(v, m) {
     save();
     const msg = first ? (level() > rankBefore ? `LEVEL ${level()}: your pet is evolving` : `+${m.xp} XP`) : "Already cleared";
     toast(fluency(m.lang) === 12 && first ? `${RA.langs[m.lang].name} fluency complete` : msg);
-    out.insertAdjacentHTML("beforeend", `\n\n<span class="ok">ACCESS GRANTED.</span> ${first ? `+${m.xp} XP. Rank ${m.rank + 1 <= 12 ? m.rank + 1 + " unlocked." : "12 complete: certificate issued."}` : ""} ${how === "ci" ? "Marked pending until GitHub Actions goes green." : ""}`);
+    out.insertAdjacentHTML("beforeend", `\n\n<span class="ok">ACCESS GRANTED.</span> ${first ? `+${m.xp} XP. Rank ${m.rank + 1 <= 12 ? m.rank + 1 + " unlocked." : "12 complete: certificate issued."}` : ""} ${how === "ci" ? "Marked pending until GitHub Actions goes green." : how === "offline" ? "Structure only for now: it re-verifies automatically when you're back online." : ""}`);
     const row = $(".row"); if (first && next && !v.querySelector("[data-go]")) { row.insertAdjacentHTML("beforeend", `<button data-go="${next.id}">Next: rank ${next.rank} →</button>`); row.querySelector("[data-go]").onclick = () => { ui.mission = next.id; render(); }; }
   }
 }
@@ -305,23 +403,54 @@ function checkpointList(m, meta, results) {
 function judgeCfg() {
   const st = S.settings, headers = {};
   if (st.token) headers[st.tokenHeader || "X-Auth-Token"] = st.token;
-  return { hosts: { ce: st.ce || RA.judge0Hosts.ce, extra: st.extra || RA.judge0Hosts.extra }, headers };
+  return { hosts: { ce: st.ce || RA.judge0Hosts.ce, extra: st.extra || RA.judge0Hosts.extra }, headers, timeout: 60000 };
 }
-// In-browser fallback for JS/TS: same generated harness, executed with a captured console.
-let tsLoad;
-async function localRun(m, code) {
-  let js = RA.compose(m, code, "judge0");
-  if (m.lang === "typescript") {
-    if (!window.ts) tsLoad = tsLoad || new Promise((res, rej) => { const s = document.createElement("script"); s.src = "https://cdn.jsdelivr.net/npm/typescript@5.6.3/lib/typescript.min.js"; s.onload = res; s.onerror = () => rej(new Error("TypeScript CDN unreachable")); document.head.appendChild(s); });
-    await tsLoad;
-    js = window.ts.transpileModule(js, { compilerOptions: { target: 99, module: 99 } }).outputText;
+// Picks where checkpoints run (Settings → Engines → mode) and falls back in order:
+//   auto:   on device if its pack is ready, else Judge0, else on device (downloading the pack if online)
+//   judge0: Judge0, then on device
+//   device: on device only, so your code never leaves this machine
+// Returns { rep, how: "judge0" | "local" } or { offline: true, reason } when nothing could run it.
+async function checkpoints(m, code, say) {
+  const mode = S.settings.mode, hasLocal = !!(RL && RL.has(m.lang));
+  const ready = hasLocal && (await RL.ready(m.lang)), possible = hasLocal && (ready || online);
+  const order = [];
+  if (mode === "device") { if (possible) order.push("local"); }
+  else if (mode === "judge0") { if (online) order.push("judge0"); if (possible) order.push("local"); }
+  else { if (ready) order.push("local"); if (online) order.push("judge0"); if (!ready && possible) order.push("local"); }
+  const errors = [];
+  for (const how of order) {
+    try {
+      if (how === "judge0") { say(`Running on ${RA.ENGINES[m.lang].label}…`); return { rep: await RA.runJudge0(m, code, judgeCfg()), how }; }
+      say(ready ? "Running on this device…" : "Fetching the on-device runtime (first time only)…");
+      return { rep: await RL.run(m, code, (ph) => say(ph === "loading" ? "Starting the on-device runtime…" : "Running on this device…")), how };
+    } catch (e) { errors.push((how === "judge0" ? "Judge0: " : "on device: ") + e.message); }
   }
-  js = js.replace(/^\s*export\s*\{\s*\};?\s*$/gm, "");
-  const lines = [], log = (...a) => lines.push(a.map((x) => (typeof x === "string" ? x : JSON.stringify(x))).join(" "));
-  const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
-  try { await new AsyncFunction("console", js)({ log, error: log, warn: log, info: log }); await new Promise((r) => setTimeout(r, 50)); }
-  catch (e) { lines.push("::cp::FAIL::Runs to completion::" + e.message); }
-  return Object.assign(RA.buildReport(m, metaFor(m), { status: "Accepted", stdout: lines.join("\n") }), { engine: "Browser" });
+  return { offline: true, reason: errors.length ? errors.join("; ")
+    : !online ? "you're offline" + (hasLocal ? " and this track's offline pack isn't downloaded" : "")
+    : mode === "device" ? "on-device only mode, and this language has no on-device runner" : "no engine available" };
+}
+// Ranks cleared on structure checks alone (offline), waiting for a real run.
+const pendingVerify = () => RA.missions.filter((m) => isDone(m.id) && S.verified[m.id] === "offline" && !metaFor(m).ciOnly && S.code[m.id]);
+let reverifying = false;
+const reverifyFailed = new Set(); // this session only: don't keep re-sending code that already failed
+async function reverify(auto, onStep) {
+  if (reverifying) return null;
+  reverifying = true;
+  const list = pendingVerify().filter((m) => !(auto && reverifyFailed.has(m.id)));
+  const res = { ok: [], failed: [], skipped: [] };
+  try {
+    for (const m of list) {
+      onStep && onStep(m, res);
+      const r = await checkpoints(m, S.code[m.id], () => {});
+      if (r.offline) res.skipped.push(m.id);
+      else if (RA.allPassed(r.rep)) { S.verified[m.id] = r.how; res.ok.push(m.id); save(); }
+      else { res.failed.push(m.id); reverifyFailed.add(m.id); }
+      if (r.how === "judge0") await new Promise((ok) => setTimeout(ok, 1500)); // go easy on the public instance
+    }
+  } finally { reverifying = false; }
+  if (res.ok.length || !auto) toast(`Re-verified ${res.ok.length}/${list.length}${res.failed.length ? ` · ${res.failed.length} need fixes` : ""}${res.skipped.length ? ` · ${res.skipped.length} still offline` : ""}`);
+  hud();
+  return res;
 }
 
 // ---------- intel ----------
@@ -418,9 +547,10 @@ function pet(v) {
 // ---------- backup ----------
 function backup(v) {
   let snaps = []; try { snaps = JSON.parse(store.get(SNAP)) || []; } catch (e) {}
-  const json = JSON.stringify(S, null, 2);
+  // Backups leave out your Judge0 token, so a shared save never leaks a key. Restoring keeps the token you have here.
+  const json = JSON.stringify(Object.assign({}, S, { settings: Object.assign({}, S.settings, { token: "" }) }), null, 2);
   const subs = RA.missions.filter((m) => S.code[m.id] && S.code[m.id] !== m.starter);
-  v.innerHTML = `<div class="cols"><div class="panel"><h2>Back up your save</h2><p class="mut"><b class="acc">Progress lives in this session.</b> Download or copy a backup before you close the tab, then restore it next time. The Swift Playgrounds app reads the same format.</p>
+  v.innerHTML = `${S.faction ? "" : `<div class="row" style="margin-bottom:12px"><button id="toIntro">← Back to the intro</button></div>`}<div class="cols"><div class="panel"><h2>Back up your save</h2><p class="mut">${store.persistent ? `<b class="acc">Saved in this browser</b> on every change, and it works offline. Back up to move to another device or browser, or into the Swift Playgrounds app (same format). Clearing site data erases it.` : `<b class="bad">This browser is blocking storage</b> (private window or site data turned off), so progress lasts only until you close the tab. Download a backup before you leave.`} Your Judge0 token is left out of backups.</p>
     <div class="row"><button class="primary" id="dl">Download .json</button><button id="cp">Copy to clipboard</button></div>
     <textarea class="backup" id="bx" readonly>${esc(json)}</textarea>
     <h2 style="margin-top:20px">Export submissions</h2><p class="mut">${subs.length} mission file${subs.length === 1 ? "" : "s"} with your code. Unzip into <code>submissions/</code> in your copy of the repo and push: the <code>checkpoints</code> workflow grades every file on current toolchains, including the ranks Judge0 can't run.</p>
@@ -433,7 +563,10 @@ function backup(v) {
     <div class="mlist">${snaps.length ? snaps.map((s, i) => `<div class="row panel between snap"><span>${esc(s.label)}<br><span class="mut">${new Date(s.at).toLocaleString()} · ${s.data.xp} XP</span></span><button data-snap="${i}">Restore</button></div>`).join("") : `<p class="mut">No snapshots yet. Clear a mission.</p>`}</div></div></div>`;
   const restore = (d, label) => {
     if (!d || d.format !== "rootaccess-save") return toast("That doesn't look like a ROOT//ACCESS save");
-    snapshot("Before " + label); S = migrate(d); if (!S.faction) S.faction = "sentinel"; save();
+    const token = S.settings.token;
+    snapshot("Before " + label); S = migrate(d); if (!S.faction) S.faction = "sentinel";
+    if (!S.settings.token && token) S.settings.token = token;
+    applyPrefs(); save();
     const lost = (S.legacy.done || []).length; toast(lost ? `Save restored. ${lost} prototype missions archived, XP kept.` : "Save restored");
     ui.view = "missions"; render();
   };
@@ -442,33 +575,146 @@ function backup(v) {
   $("#zip").onclick = () => { download("submissions.zip", window.makeZip(subs.map((m) => ({ name: `submissions/${m.id}.${EXT[m.lang]}`, text: S.code[m.id] })))); toast("submissions.zip downloaded"); };
   $("#file").onchange = (e) => { const f = e.target.files[0]; if (!f) return; f.text().then((t) => { try { restore(JSON.parse(t), "file restore"); } catch (err) { toast("Couldn't read that file"); } }); };
   $("#imp").onclick = () => { try { restore(JSON.parse($("#paste").value), "paste restore"); } catch (e) { toast("Invalid JSON"); } };
-  $("#wipe").onclick = (e) => { if (e.target.dataset.armed) { snapshot("Before wipe"); S = fresh(); save(); render(); } else { e.target.dataset.armed = 1; e.target.textContent = "Click again to confirm"; } };
+  if ($("#toIntro")) $("#toIntro").onclick = () => { ui.view = "missions"; render(); };
+  $("#wipe").onclick = (e) => { if (e.target.dataset.armed) { snapshot("Before wipe"); const keep = { prefs: S.prefs, settings: S.settings }; S = Object.assign(fresh(), keep); save(); render(); } else { e.target.dataset.armed = 1; e.target.textContent = "Click again to confirm"; } };
   v.onclick = (e) => { const i = e.target.closest("[data-snap]")?.dataset.snap; if (i != null) restore(snaps[i].data, "snapshot restore"); };
 }
 
-// ---------- engines / settings ----------
+// ---------- settings: display, engines, offline ----------
 function settings(v) {
+  const tabs = [["display", "Display"], ["engines", "Engines"], ["offline", "Offline"]];
+  v.innerHTML = `<div class="row tabs" role="tablist">${tabs.map(([k, t]) => `<button role="tab" aria-selected="${k === ui.set}" data-st="${k}" class="${k === ui.set ? "on" : ""}">${t}</button>`).join("")}</div><div id="setbody"></div>`;
+  v.onclick = (e) => { const t = e.target.closest("[data-st]")?.dataset.st; if (t) { ui.set = t; render(); } };
+  ({ display: displaySettings, engines: engineSettings, offline: offlineSettings })[ui.set]($("#setbody"));
+}
+const radios = (key, opts, cur) => `<div class="seg" role="radiogroup">${opts.map(([val, label]) => `<label><input type="radio" name="${key}" value="${val}" ${String(cur) === String(val) ? "checked" : ""}> ${label}</label>`).join("")}</div>`;
+
+function displaySettings(el) {
+  const p = S.prefs, sysDark = matchMedia("(prefers-color-scheme: dark)").matches;
+  const sw = (hex) => `<span class="swatch" style="background:${hex}"></span>`;
+  el.innerHTML = `<div class="cols"><div class="set">
+    <fieldset><legend>Theme</legend>${radios("scheme", [["system", `System (currently ${sysDark ? "dark" : "light"})`], ["dark", "Dark terminal"], ["light", "Light paper"]], p.scheme)}
+      <p class="lbl">Contrast</p>${radios("contrast", [["system", "System"], ["normal", "Normal"], ["more", "High contrast"]], p.contrast)}</fieldset>
+    <fieldset><legend>Accent colour</legend>${radios("accent", [["faction", `${sw(F() ? F().color : ACCENTS.matrix)} Faction`], ...Object.entries(ACCENTS).map(([k, h]) => [k, `${sw(h)} ${k[0].toUpperCase() + k.slice(1)}`]), ["custom", `${sw(p.customAccent)} Custom`]], p.accent)}
+      <label class="lbl">Custom colour <input type="color" id="customAccent" value="${esc(p.customAccent)}"></label>
+      <p class="mut tiny">On the light theme, accent text is darkened automatically so it stays readable.</p></fieldset>
+    <fieldset><legend>Text</legend>
+      <label class="lbl">Interface size: <b id="scaleV">${p.scale}%</b><input type="range" id="scale" min="80" max="150" step="5" value="${p.scale}"></label>
+      <label class="lbl">Editor font size: <b id="edV">${p.editorSize}px</b><input type="range" id="editorSize" min="11" max="22" step="1" value="${p.editorSize}"></label>
+      <p class="lbl">Reading font (code always stays monospaced)</p>${radios("font", [["mono", "Monospace"], ["sans", "Sans-serif"], ["serif", "Serif"]], p.font)}</fieldset>
+  </div><div class="set">
+    <fieldset><legend>Layout</legend><p class="lbl">Mission screen</p>${radios("layout", [["side", "Lesson | editor"], ["stacked", "Stacked"], ["editor-first", "Editor on top"]], p.layout)}
+      <p class="lbl">Density</p>${radios("density", [["compact", "Compact"], ["normal", "Normal"], ["roomy", "Roomy"]], p.density)}
+      <p class="lbl">Page width</p>${radios("width", [["normal", "Centred"], ["full", "Full width"]], p.width)}</fieldset>
+    <fieldset><legend>Motion and effects</legend><p class="lbl">Code rain</p>${radios("rain", [["on", "On"], ["low", "Subtle"], ["off", "Off"]], p.rain)}
+      <p class="lbl">Animations</p>${radios("motion", [["system", "System"], ["reduce", "Reduced"], ["full", "Full"]], p.motion)}
+      <label class="lbl"><input type="checkbox" id="typewriter" ${p.typewriter ? "checked" : ""}> Typewriter effect on the intro</label></fieldset>
+    <fieldset><legend>Preview</legend><div class="preview"><p><b class="acc">HANDLER:</b> The board is yours. <code>print("jacked in")</code></p><pre class="editor" style="min-height:0">for host in hosts:\n    ping(host)</pre><div class="row"><button class="primary" tabindex="-1">Run checkpoints</button><span class="chip ok">✓ verified</span><span class="bad">✗ failing</span></div></div>
+      <div class="row" style="margin-top:10px"><button id="resetDisplay">Reset display settings</button></div></fieldset>
+  </div></div>`;
+  const commit = () => { applyPrefs(); save(); };
+  el.onchange = (e) => {
+    const t = e.target;
+    if (t.type === "radio") { p[t.name] = t.value; commit(); if (t.name === "accent" || t.name === "scheme") displaySettings(el); }
+    else if (t.id === "typewriter") { p.typewriter = t.checked; save(); }
+    else if (t.id === "customAccent") { p.customAccent = t.value; p.accent = "custom"; commit(); displaySettings(el); }
+    else if (t.id === "scale" || t.id === "editorSize") { p[t.id] = +t.value; commit(); }
+  };
+  el.oninput = (e) => { // live preview while dragging, saved on change
+    const t = e.target;
+    if (t.id === "scale") { $("#scaleV").textContent = t.value + "%"; ROOT.style.setProperty("--scale", t.value / 100); }
+    if (t.id === "editorSize") { $("#edV").textContent = t.value + "px"; ROOT.style.setProperty("--ed", t.value + "px"); }
+  };
+  $("#resetDisplay").onclick = () => { S.prefs = defaultPrefs(); commit(); render(); toast("Display settings reset"); };
+}
+
+function engineSettings(el) {
   const st = S.settings;
-  v.innerHTML = `<div class="cols"><div class="panel"><h2>Test engines</h2><p class="mut">The free public Judge0 instances need no key but are rate-limited. Point the game at your own self-hosted Judge0, or a hosted plan, if you hit limits.</p>
+  el.innerHTML = `<div class="cols"><div class="panel"><h2>Where checkpoints run</h2>
+    ${radios("mode", [["auto", "Auto: on device when ready, else Judge0"], ["judge0", "Judge0 first"], ["device", "On device only (code never leaves this machine)"]], st.mode)}
+    <p class="mut tiny">On-device runners cover Boot Camp, Python, SQL, JavaScript and TypeScript (see Offline). Other languages always use Judge0, or structure checks while offline.</p>
+    <h2 style="margin-top:18px">Judge0</h2><p class="mut">The free public instances need no key but are rate-limited. Point the game at your own self-hosted Judge0, or a hosted plan, if you hit limits.</p>
     <label class="lbl">Judge0 CE host<input class="field" id="ce" value="${esc(st.ce)}"></label>
     <label class="lbl">Judge0 Extra host (C#)<input class="field" id="extra" value="${esc(st.extra)}"></label>
     <label class="lbl">Auth header<select class="field" id="th">${["X-Auth-Token", "X-RapidAPI-Key"].map((h) => `<option ${h === st.tokenHeader ? "selected" : ""}>${h}</option>`).join("")}</select></label>
-    <label class="lbl">Token or key (optional, kept only in this session)<input class="field" id="tok" type="password" value="${esc(st.token)}" autocomplete="off"></label>
-    <div class="row"><button class="primary" id="savee">Save</button><button id="defaults">Use public instances</button><button id="ping">Test connection</button></div>
-    <div class="term" id="pingout" style="margin-top:10px"><span class="mut">&gt; not tested</span></div></div>
+    <label class="lbl">Token or key (optional; stored in this browser, never put in backups)<input class="field" id="tok" type="password" value="${esc(st.token)}" autocomplete="off"></label>
+    <div class="row"><button class="primary" id="savee">Save</button><button id="defaults">Use public instances</button><button id="ping" ${online ? "" : "disabled"}>Test connection</button></div>
+    <div class="term" id="pingout" style="margin-top:10px"><span class="mut">&gt; ${online ? "not tested" : "offline"}</span></div></div>
   <div class="panel"><h2>GitHub Actions</h2><p>The repository's <code>.github/workflows/checkpoints.yml</code> runs every checkpoint on current toolchains on each push:</p>
     <ul>${LANG_ORDER.map((L) => `<li><b>${esc(RA.langs[L].name)}</b>: ${esc(RA.CI_TOOLCHAINS[L])}</li>`).join("")}</ul>
     <p class="mut">Locally: <code>node tools/checkpoints.js --lang go</code>, or <code>--dir submissions</code> to grade your exported files.</p></div></div>`;
+  el.onchange = (e) => { if (e.target.name === "mode") { st.mode = e.target.value; save(); toast("Run mode saved"); } };
   const read = () => ({ ce: $("#ce").value.trim().replace(/\/$/, ""), extra: $("#extra").value.trim().replace(/\/$/, ""), tokenHeader: $("#th").value, token: $("#tok").value.trim() });
-  $("#savee").onclick = () => { S.settings = Object.assign(S.settings, read()); save(); toast("Engine settings saved"); };
-  $("#defaults").onclick = () => { S.settings = fresh().settings; save(); settings(v); toast("Using the public Judge0 instances"); };
+  $("#savee").onclick = () => { Object.assign(st, read()); save(); toast("Engine settings saved"); };
+  $("#defaults").onclick = () => { const f = fresh().settings; Object.assign(st, { ce: f.ce, extra: f.extra, token: "", tokenHeader: f.tokenHeader }); save(); render(); toast("Using the public Judge0 instances"); };
   $("#ping").onclick = async () => {
-    S.settings = Object.assign(S.settings, read()); save();
+    Object.assign(st, read()); save();
     const o = $("#pingout"); o.innerHTML = '<span class="mut">&gt; running py1 reference solution…</span>';
-    try { const m = BYID.py1, rep = await RA.runJudge0(m, RA.SOLUTIONS.py1, judgeCfg()); o.innerHTML = RA.allPassed(rep) ? `<span class="ok">Connected.</span> ${esc(rep.engine)} ran ${rep.results.length} checkpoints in ${rep.time || "?"}s.` : `<span class="bad">Reached Judge0 but the run failed:</span> ${esc(rep.status)}`; }
-    catch (e) { o.innerHTML = `<span class="bad">Couldn't connect:</span> ${esc(e.message)}`; }
+    try { const m = BYID.py1, rep = await RA.runJudge0(m, RA.SOLUTIONS.py1, judgeCfg()); o.innerHTML = RA.allPassed(rep) ? `<span class="ok">✓ Connected.</span> ${esc(rep.engine)} ran ${rep.results.length} checkpoints in ${rep.time || "?"}s.` : `<span class="bad">✗ Reached Judge0 but the run failed:</span> ${esc(rep.status)}`; }
+    catch (e) { o.innerHTML = `<span class="bad">✗ Couldn't connect:</span> ${esc(e.message)}`; }
   };
 }
 
+function offlineSettings(el) {
+  const st = S.settings, pend = pendingVerify(), sw = "serviceWorker" in navigator && /^https?:$/.test(location.protocol);
+  const rows = LANG_ORDER.map((L) => { const d = RA.LOCAL[L];
+    return `<tr><td>${esc(RA.langs[L].name)}</td><td>${d ? `✓ ${esc(d.label)}${d.pack ? ` <span class="mut">(${esc(RA.PACKS[d.pack].label)} pack)</span>` : ""}` : `<span class="mut">Structure checks; clears re-verify online</span>`}</td></tr>`; }).join("");
+  el.innerHTML = `<div class="cols"><div class="set">
+    <div class="panel"><h2>Offline status</h2><ul>
+      <li>${online ? "● Online: Judge0 is available." : "○ Offline: running on device and structure checks."}</li>
+      <li id="swst">${sw ? (navigator.serviceWorker.controller ? "✓ App cached: it opens with no network." : "… Caching the app for offline use (reload once if this stays).") : "✗ Offline caching needs the app served over https or localhost (not opened as a file)."}</li>
+      <li>${store.persistent ? "✓ Progress saves in this browser." : "✗ This browser is blocking storage: back up before closing."}</li>
+      <li id="quota" class="mut">Checking storage…</li></ul></div>
+    <div class="panel packs"><h2>Offline packs</h2><p class="mut">Download once and these tracks run real checkpoints with no network. Packs are cached by the browser; nothing is installed.</p>
+      ${RL ? RL.packs().map((k) => `<div class="pk" data-pack="${k}"><div><b>${esc(RA.PACKS[k].label)}</b> <span class="mut">${esc(RA.PACKS[k].size)}</span><div class="tiny mut" data-pst>checking…</div></div><div class="row"><button class="primary" data-dl="${k}">Download</button><button data-rm="${k}">Remove</button></div></div>`).join("") : ""}
+      <label class="lbl">Pack mirror (optional): a folder URL that serves the same files, e.g. your own copy made with <code>node tools/fetch-packs.js</code>
+        <input class="field" id="pyBase" placeholder="Python: ${esc(RA.PACKS.python.base)}" value="${esc(st.packBase.python || "")}">
+        <input class="field" id="tsBase" placeholder="TypeScript: ${esc(RA.PACKS.typescript.base)}" value="${esc(st.packBase.typescript || "")}"></label>
+      <div class="row"><button id="saveBase">Save mirrors</button></div></div>
+  </div><div class="set">
+    <div class="panel"><h2>When there's no engine</h2>
+      <label class="lbl"><input type="checkbox" id="offlineClears" ${st.offlineClears ? "checked" : ""}> Let ranks clear on structure checks while offline (marked "structure only")</label>
+      <label class="lbl"><input type="checkbox" id="autoReverify" ${st.autoReverify ? "checked" : ""}> Re-verify those ranks automatically when the connection comes back</label>
+      <h3 style="margin-top:12px">Waiting to re-verify: ${pend.length}</h3>
+      ${pend.length ? `<p class="mut tiny">${pend.map((m) => esc(m.id)).join(", ")}</p>` : `<p class="mut">Nothing waiting.</p>`}
+      <div class="row"><button class="primary" id="reverify" ${pend.length && !reverifying ? "" : "disabled"}>Re-verify now</button></div><p id="rvout" class="mut tiny"></p></div>
+    <div class="panel"><h2>What runs offline</h2><div class="tablewrap"><table><thead><tr><th>Track</th><th>Offline</th></tr></thead><tbody>${rows}</tbody></table></div>
+      <p class="mut tiny">TypeScript runs offline through its transpiler, so type errors only show up on Judge0 and in GitHub Actions. CI-only ranks always grade in GitHub Actions.</p></div>
+  </div></div>`;
+  const status = async () => {
+    for (const box of el.querySelectorAll("[data-pack]")) {
+      const k = box.dataset.pack, ps = await RL.packStatus(k);
+      box.querySelector("[data-pst]").textContent = ps.ready ? `✓ Ready offline · from ${ps.base}` : ps.have ? `${ps.have}/${ps.total} files cached · from ${ps.base}` : `Not downloaded · from ${ps.base}`;
+      box.querySelector("[data-dl]").disabled = ps.ready || !online;
+      box.querySelector("[data-rm]").disabled = !ps.have;
+    }
+  };
+  if (RL) status();
+  if (navigator.storage && navigator.storage.estimate) Promise.all([navigator.storage.estimate(), navigator.storage.persisted ? navigator.storage.persisted() : false]).then(([q, keep]) => {
+    const mb = (b) => (b / 1048576).toFixed(b > 1048576 * 100 ? 0 : 1) + " MB";
+    $("#quota").textContent = `Using ${mb(q.usage || 0)} of ${mb(q.quota || 0)} available${keep ? " · protected from automatic clean-up" : ""}.`;
+  }).catch(() => {}); else $("#quota").textContent = "";
+  el.onclick = async (e) => {
+    const dl = e.target.closest("[data-dl]")?.dataset.dl, rm = e.target.closest("[data-rm]")?.dataset.rm;
+    if (dl) {
+      const line = e.target.closest("[data-pack]").querySelector("[data-pst]"); e.target.disabled = true;
+      try { await RL.download(dl, (i, n) => { line.textContent = `Downloading ${i}/${n}…`; }); toast(`${RA.PACKS[dl].label} ready offline`); }
+      catch (err) { toast("Download failed: " + err.message); }
+      status();
+    }
+    if (rm) { await RL.remove(rm); toast("Pack removed"); status(); }
+    if (e.target.id === "reverify") {
+      e.target.disabled = true; const o = $("#rvout");
+      const res = await reverify(false, (m, r) => { o.textContent = `Checking ${m.id}… (${r.ok.length} verified so far)`; });
+      if (res) o.textContent = `${res.ok.length} verified${res.failed.length ? `; failing now: ${res.failed.join(", ")} (open them to see why)` : ""}${res.skipped.length ? `; ${res.skipped.length} couldn't reach an engine` : ""}.`;
+      setTimeout(() => ui.view === "settings" && ui.set === "offline" && render(), 2500);
+    }
+  };
+  el.onchange = (e) => { if (e.target.id === "offlineClears" || e.target.id === "autoReverify") { st[e.target.id] = e.target.checked; save(); } };
+  $("#saveBase").onclick = () => { st.packBase = { python: $("#pyBase").value.trim(), typescript: $("#tsBase").value.trim() }; Object.keys(st.packBase).forEach((k) => !st.packBase[k] && delete st.packBase[k]); RL && RL.setBases(st.packBase); save(); status(); toast("Mirrors saved"); };
+}
+
+applyPrefs();
+if (RL) RL.setBases(S.settings.packBase);
 render();
 })();

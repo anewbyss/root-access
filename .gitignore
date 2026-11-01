@@ -6,3 +6,5 @@ node_modules/
 /submissions-*.json
 .build/
 .swiftpm/xcode/
+web/vendor/
+.ci-offline/

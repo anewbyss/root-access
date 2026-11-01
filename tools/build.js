@@ -1,9 +1,10 @@
-// Copies the curriculum into web/curriculum and bundles harnesses + reference solutions for the browser.
+// Copies the curriculum into web/curriculum, bundles harnesses + reference solutions for the browser,
+// and stamps web/sw.js with the offline file list and a content hash (so each change ships as a new cache).
 // usage: node tools/build.js
-const fs = require("fs"), path = require("path");
+const fs = require("fs"), path = require("path"), crypto = require("crypto");
 const ROOT = path.join(__dirname, "..");
-const SRC = path.join(ROOT, "curriculum"), OUT = path.join(ROOT, "web", "curriculum");
-const ORDER = ["_core", "_world", "_dossiers", "_engine", "basics", "python", "javascript", "typescript", "sql", "bash", "go", "rust", "swift", "kotlin", "java", "csharp", "cpp", "_steps", "_guide"];
+const SRC = path.join(ROOT, "curriculum"), WEB = path.join(ROOT, "web"), OUT = path.join(WEB, "curriculum");
+const ORDER = ["_core", "_world", "_dossiers", "_engine", "_local", "basics", "python", "javascript", "typescript", "sql", "bash", "go", "rust", "swift", "kotlin", "java", "csharp", "cpp", "_steps", "_guide"];
 
 fs.rmSync(OUT, { recursive: true, force: true });
 fs.mkdirSync(OUT, { recursive: true });
@@ -16,5 +17,18 @@ const bundle = (dir, key) => {
 };
 fs.writeFileSync(path.join(OUT, "checkpoints.js"), bundle("checkpoints", "HARNESS"));
 fs.writeFileSync(path.join(OUT, "solutions.js"), bundle("solutions", "SOLUTIONS"));
-fs.writeFileSync(path.join(OUT, "manifest.json"), JSON.stringify({ order: ORDER.concat(["checkpoints", "solutions"]), built: new Date().toISOString() }, null, 2));
-console.log("web/curriculum: " + (ORDER.length + 2) + " files");
+fs.writeFileSync(path.join(OUT, "manifest.json"), JSON.stringify({ order: ORDER.concat(["checkpoints", "solutions"]) }, null, 2) + "\n");
+
+// Offline shell: the page, everything it loads, the worker, manifest and icons.
+const html = fs.readFileSync(path.join(WEB, "index.html"), "utf8");
+const shell = ["./", "index.html", ...[...html.matchAll(/(?:src|href)="([^":#]+)"/g)].map((x) => x[1]), "worker.js", "icon-512.png"]
+  .filter((p, i, a) => a.indexOf(p) === i && (p === "./" || fs.existsSync(path.join(WEB, p))));
+const hash = crypto.createHash("sha256");
+for (const p of shell) if (p !== "./") hash.update(p).update(fs.readFileSync(path.join(WEB, p)));
+const version = hash.digest("hex").slice(0, 12);
+const swPath = path.join(WEB, "sw.js");
+const sw = fs.readFileSync(swPath, "utf8")
+  .replace(/^const VERSION = .*\/\/ @@VERSION$/m, `const VERSION = "${version}"; // @@VERSION`)
+  .replace(/^const SHELL = .*\/\/ @@SHELL$/m, `const SHELL = ${JSON.stringify(shell)}; // @@SHELL`);
+fs.writeFileSync(swPath, sw);
+console.log(`web/curriculum: ${ORDER.length + 2} files · sw.js ${version}, ${shell.length} offline files`);
