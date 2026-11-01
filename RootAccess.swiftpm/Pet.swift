@@ -8,7 +8,7 @@ import SwiftUI
             VStack(alignment: .leading, spacing: 14) {
                 Panel {
                     PetCanvas(pet: store.s.pet, stage: store.stageIndex).frame(height: 300).frame(maxWidth: .infinity)
-                        .background(RadialGradient(colors: [Color(hex: "#0b2a1a"), .black], center: .center, startRadius: 0, endRadius: 200))
+                        .background(RadialGradient(colors: [Color.hiBg, Color.codeBg], center: .center, startRadius: 0, endRadius: 200))
                     TextField("Name", text: $store.s.pet.name).textFieldStyle(.roundedBorder)
                     Button("Feed a commit") {
                         if store.s.pet.energy >= 100 { store.flash("\(store.s.pet.name) is full. Go clear a mission.") }
@@ -36,7 +36,7 @@ import SwiftUI
                 Button { store.s.pet[keyPath: path] = p.id } label: {
                     Text(locked ? "\(p.label) · LVL \(p.lvl)" : p.label).font(.caption).padding(8)
                         .overlay(Rectangle().stroke(on ? store.accent : Color.line))
-                }.disabled(locked).foregroundStyle(on ? store.accent : .white).opacity(locked ? 0.4 : 1)
+                }.disabled(locked).foregroundStyle(on ? store.accent : Color.ink).opacity(locked ? 0.4 : 1)
             } } }
         }
     }

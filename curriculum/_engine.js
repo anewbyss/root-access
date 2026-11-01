@@ -208,11 +208,11 @@ ra_eq() { if [ "$2" = "$3" ]; then echo "::cp::PASS::$1"; else echo "::cp::FAIL:
   };
   RA.withPrelude = (L, h) => h.replace(/^.*@@PRELUDE@@.*$/m, () => RA.PRELUDE[L] || "");
 
-  // Compose learner code + harness for one mission. env: "judge0" | "ci"
+  // Compose learner code + harness for one mission. env: "judge0" | "ci" | "local" (in-app runners, see _local.js)
   RA.compose = (m, user, env) => {
     env = env || "judge0";
     const L = m.lang;
-    if (L === "python" || L === "basics") return RA.genPython(m, user);
+    if (L === "python" || L === "basics") return RA.genPython(m, user, env);
     if (L === "javascript") return RA.genJs(m, user, false);
     if (L === "typescript") return RA.genJs(m, user, true);
     if (L === "sql") return RA.genSql(m, user);
@@ -280,7 +280,9 @@ ra_eq() { if [ "$2" = "$3" ]; then echo "::cp::PASS::$1"; else echo "::cp::FAIL:
 
   // ---- generated harnesses for languages whose tests already live in the curriculum ----
   const pyIndent = (s) => s.split("\n").map((l) => "    " + l).join("\n");
-  RA.genPython = (m, user) => {
+  // env "local" runs under Pyodide's runPythonAsync, where asyncio.run() can't nest inside the browser's event loop,
+  // so the test coroutine is awaited at top level instead. Everything else is identical.
+  RA.genPython = (m, user, env) => {
     if (!m.test || !m.test.py) return null;
     return `import asyncio, sys
 def __ra_cp(ok, label, detail=""):
@@ -312,7 +314,7 @@ ${pyIndent(m.test.py)}
 if __ra_user_ok:
     __ra_cp(True, "Your code runs")
     try:
-        asyncio.run(__ra_tests())
+        ${env === "local" ? "await __ra_tests()" : "asyncio.run(__ra_tests())"}
     except BaseException as __e:
         __ra_cp(False, "Checkpoints finished", f"{type(__e).__name__}: {__e}")
 `;
@@ -413,7 +415,11 @@ if ran:
   RA.runJudge0 = async (m, user, cfg) => {
     const req = RA.judge0Request(m, user, cfg);
     if (req.ciOnly || req.error) return Object.assign({ results: [] }, req);
-    const res = await fetch(req.url, { method: "POST", headers: req.headers, body: req.body });
+    // cfg.timeout (ms) aborts a hung request; the public instance can stall under load.
+    const signal = cfg && cfg.timeout && typeof AbortSignal !== "undefined" && AbortSignal.timeout ? AbortSignal.timeout(cfg.timeout) : undefined;
+    let res;
+    try { res = await fetch(req.url, { method: "POST", headers: req.headers, body: req.body, signal }); }
+    catch (e) { throw new Error(e && e.name === "TimeoutError" ? "Judge0 didn't answer in " + Math.round(cfg.timeout / 1000) + " s" : (e && e.message) || String(e)); }
     if (!res.ok) throw new Error("Judge0 HTTP " + res.status);
     return RA.judge0Finish(m, req, await res.json(), user);
   };

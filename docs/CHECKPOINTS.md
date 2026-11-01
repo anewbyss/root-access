@@ -52,5 +52,23 @@ Env: `CXX` picks the C++ compiler; `RA_LIB` points at the Kotlin/Java jars (coro
 ## Engine notes
 
 - Judge0's public toolchains are older than CI's (Swift 5.2, Java 17, Kotlin 2.1, an older `tsc`). Harnesses are written to work on both; anything that can't is CI-only.
-- The public Judge0 instances are rate-limited. The web app falls back to an in-browser runner for JavaScript and TypeScript if Judge0 is unreachable, and marks those clears "verified · in browser".
+- The public Judge0 instances are rate-limited, and need a network. See "On-device runners" below for what runs without them.
 - The Swift app runs the exact same JavaScript (curriculum, harnesses, report parser) inside JavaScriptCore and only uses Swift for the HTTP call. The `swift playgrounds app` CI job type-checks the app against the iOS 17 SDK and runs that engine on macOS.
+
+## On-device runners (offline)
+
+`curriculum/_local.js` composes the same harness with `RA.compose(m, code, "local")` and parses the same `::cp::` lines, so a local pass is the same set of checkpoints:
+
+| Track | Web app | Swift app |
+|---|---|---|
+| Boot Camp, Python, SQL | Pyodide 0.28.3 (CPython 3.13 in WebAssembly, `sqlite3` included) in a Web Worker | Judge0, or structure checks offline |
+| JavaScript | Fresh Web Worker per run | JavaScriptCore with a virtual-timer shim (`RA.JS_SHIM`) |
+| TypeScript | TypeScript 5.6.3 `transpileModule`, then JS. Type errors are left to Judge0/CI | Judge0, or structure checks offline |
+| Everything else | Structure checks; the rank clears as "structure only" and re-verifies on Judge0 when you're back online | Same |
+
+The only harness difference: Python's `local` mode awaits the test coroutine at top level, because `asyncio.run()` can't nest inside the browser's event loop. Runs are stopped after 10 s (the worker is terminated, or JavaScriptCore's execution time limit fires), so an infinite loop never freezes the app.
+
+`node tools/local-check.js --modules <node_modules>` (the `offline` CI job) runs every reference solution and starter through these runners: solutions must pass, starters must fail.
+
+Packs (Pyodide, TypeScript) are downloaded once from jsDelivr into Cache Storage via Settings → Offline, or self-hosted with `node tools/fetch-packs.js`, which writes `web/vendor/` (the app prefers it automatically).
+

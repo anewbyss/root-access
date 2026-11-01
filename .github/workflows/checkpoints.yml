@@ -108,6 +108,16 @@ jobs:
         with: { node-version: 22 }
       - run: node tools/guide-check.js
 
+  offline:
+    name: on-device runners (Pyodide, TypeScript, JS shim)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with: { node-version: 22 }
+      - run: npm install --no-save --prefix .ci-offline pyodide@0.28.3 typescript@5.6.3
+      - run: node tools/local-check.js --modules .ci-offline/node_modules
+
   swift-app:
     name: swift playgrounds app
     runs-on: macos-15
@@ -115,16 +125,16 @@ jobs:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
         with: { node-version: 22 }
-      - name: Curriculum.swift matches the curriculum
+      - name: Curriculum.swift and web/ match the curriculum
         run: |
           node tools/build.js && node tools/gen-swift.js
-          git diff --exit-code RootAccess.swiftpm/Curriculum.swift
+          git diff --exit-code RootAccess.swiftpm/Curriculum.swift web/curriculum web/sw.js
       - name: Type-check the app against the iOS 17 SDK
         run: |
           cd RootAccess.swiftpm
           xcrun swiftc -typecheck -parse-as-library \
             -sdk "$(xcrun --sdk iphonesimulator --show-sdk-path)" -target arm64-apple-ios17.0-simulator \
-            App.swift Engine.swift Models.swift Pet.swift Screens.swift Curriculum.swift
+            App.swift Engine.swift Models.swift Pet.swift Screens.swift Theme.swift Curriculum.swift
       - name: Engine smoke test (JavaScriptCore + Judge0)
         run: |
           xcrun swiftc -O -target arm64-apple-macos14 -o ra-engine-test \

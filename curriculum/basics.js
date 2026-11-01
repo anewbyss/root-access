@@ -20,7 +20,7 @@ RA.add("basics", "bc", [
     "Right after it, with no space, type an opening bracket <code>(</code>.",
     "Type a quote mark <code>\"</code>, then <code>Hello, Operator</code>, then another quote mark <code>\"</code>.",
     "Close the bracket with <code>)</code>. Your line should read <code>print(\"Hello, Operator\")</code>.",
-    "Press <b>Run external checkpoints</b>. Your code is sent to a real Python 3.13 computer, which runs it and reports back."
+    "Press <b>Run checkpoints</b>. Your code runs on a real Python 3.13 engine (on this device if the offline pack is downloaded, otherwise Judge0) and the results come back."
   ],
   test: { py: `out = output_of()\ncheck(out.strip(), "Hello, Operator", "prints Hello, Operator")\ncheck(out.count("\\n"), 1, "prints exactly one line")` } },
 
@@ -198,7 +198,7 @@ print(shout("now"))     # NOW!</pre>
   starter: `def count_fails(statuses)\n    count = 0\n    for s in statuses:\n        if s == "FAIL":\n            cout = count + 1\n    return count\n`,
   checks: [[/def\s+count_fails\s*\(\s*statuses\s*\)\s*:/, "Bug 1: the def line needs a colon at the end"], [/^\s+count\s*(\+=\s*1|=\s*count\s*\+\s*1)/m, "Bug 2: the line inside the if should add 1 to count. Check the spelling."]],
   steps: [
-    "Press <b>Run external checkpoints</b> before changing anything. You'll see <code>SyntaxError: expected ':'</code>. Python is pointing at the first line.",
+    "Press <b>Run checkpoints</b> before changing anything. You'll see <code>SyntaxError: expected ':'</code>. Python is pointing at the first line.",
     "Add the missing colon to the end of the first line: <code>def count_fails(statuses):</code>.",
     "Run again. There's no error this time, but the answer is wrong (0 instead of 2), because the code inside the <code>if</code> stores into <code>cout</code>, a misspelled new variable.",
     "Change <code>cout = count + 1</code> to <code>count = count + 1</code>, or the shorter <code>count += 1</code>.",

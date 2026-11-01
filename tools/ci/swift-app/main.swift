@@ -33,6 +33,36 @@ let round = try JSONDecoder().decode(SaveData.self, from: try GameStore.encode(s
 precondition(round == save, "round trip")
 print("save migration: ok")
 
+// Display prefs and new engine settings round-trip with the web app's JSON (numbers may arrive as doubles).
+let web = #"{"format":"rootaccess-save","version":2,"done":[],"prefs":{"scheme":"light","accent":"ember","scale":120.0,"editorSize":15,"width":"full"},"settings":{"mode":"device","offlineClears":false,"packBase":{"python":"https://example.test/py/"}}}"#
+let ws = try JSONDecoder().decode(SaveData.self, from: Data(web.utf8))
+precondition(ws.prefs.scheme == "light" && ws.prefs.scale == 120 && ws.prefs.editorSize == 15 && ws.prefs.width == "full" && ws.prefs.rain == "on", "prefs")
+precondition(ws.settings.mode == "device" && !ws.settings.offlineClears && ws.settings.autoReverify && ws.settings.packBase["python"] != nil, "engine settings")
+let wsRound = try JSONDecoder().decode(SaveData.self, from: try GameStore.encode(ws))
+precondition(wsRound == ws, "prefs round trip")
+print("prefs: ok")
+
+// On-device JavaScript (JavaScriptCore + virtual timers): solutions pass, starters fail, runaway loops stop.
+let semLocal = DispatchSemaphore(value: 0)
+Task.detached {
+  do {
+    for m in d.missions where m.lang == "javascript" {
+        precondition(Engine.shared.canRunLocally(m), "\(m.id) local")
+        let ok = try await Engine.shared.runLocal(m, code: m.solution)
+        precondition(ok.passed == true, "\(m.id) solution on device: \(ok.results.filter { $0.status != "PASS" }.map(\.label))")
+        let bad = try await Engine.shared.runLocal(m, code: m.starter)
+        precondition(bad.passed != true, "\(m.id) starter should fail on device")
+    }
+    let js1 = d.missions.first(where: { $0.id == "js1" })!
+    let t0 = Date()
+    let spin = try await Engine.shared.runLocal(js1, code: js1.solution + "\nwhile (true) {}\n", limit: 2)
+    precondition(spin.passed != true && Date().timeIntervalSince(t0) < 6, "runaway loop stopped")
+    print("on-device javascript: ok (loop stopped in \(String(format: "%.1f", Date().timeIntervalSince(t0)))s)")
+  } catch { preconditionFailure("on-device run threw: \(error)") }
+    semLocal.signal()
+}
+semLocal.wait()
+
 let sem = DispatchSemaphore(value: 0)
 Task.detached {
     for id in ["py1", "sw3", "cs2"] {

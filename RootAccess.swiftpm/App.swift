@@ -4,44 +4,51 @@ import SwiftUI
     @StateObject private var store = GameStore()
     var body: some Scene {
         WindowGroup {
-            RootView().environmentObject(store).preferredColorScheme(.dark).tint(store.accent)
+            RootView().environmentObject(store).modifier(DisplayPrefs(store: store))
         }
     }
 }
 
 @MainActor struct RootView: View {
     @EnvironmentObject var store: GameStore
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    @Environment(\.colorScheme) private var scheme
     var body: some View {
         ZStack(alignment: .bottom) {
             Color.bgDeep.ignoresSafeArea()
-            CodeRain(color: store.accent).opacity(0.18).ignoresSafeArea().allowsHitTesting(false)
+            if store.s.prefs.rain != "off" {
+                CodeRain(color: store.accent, animated: !store.reduceMotion(system: systemReduceMotion))
+                    .opacity((store.s.prefs.rain == "low" ? 0.45 : 1) * (scheme == .light ? 0.08 : 0.18))
+                    .ignoresSafeArea().allowsHitTesting(false).accessibilityHidden(true)
+            }
             if store.s.faction == nil { IntroView() } else {
                 TabView {
                     NavigationStack { MissionBoard() }.tabItem { Label("Missions", systemImage: "terminal") }
                     NavigationStack { PetScreen() }.tabItem { Label("Code Pet", systemImage: "cpu") }
                     NavigationStack { IntelScreen() }.tabItem { Label("Intel", systemImage: "doc.text.magnifyingglass") }
                     NavigationStack { BackupScreen() }.tabItem { Label("Backup", systemImage: "externaldrive.badge.icloud") }
-                    NavigationStack { EnginesScreen() }.tabItem { Label("Engines", systemImage: "server.rack") }
+                    NavigationStack { SettingsScreen() }.tabItem { Label("Settings", systemImage: "gearshape") }
                 }
             }
             if let t = store.toast {
                 Text(t).font(.system(.callout, design: .monospaced)).padding(12)
-                    .background(.black.opacity(0.9)).overlay(Rectangle().stroke(store.accent)).foregroundStyle(store.accent)
+                    .background(Color.bgDeep.opacity(0.95)).overlay(Rectangle().stroke(store.accent)).foregroundStyle(store.accent)
                     .padding(.bottom, 70).transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
         .animation(.easeOut, value: store.toast)
-        .fontDesign(.monospaced)
     }
 }
 
 struct CodeRain: View {
     let color: Color
+    var animated = true
     private let glyphs = Array("アイウエオカキクケコ01{}<>/=;$#λ")
     var body: some View {
-        TimelineView(.animation(minimumInterval: 0.08)) { tl in
+        // Reduced motion: one still frame instead of falling glyphs.
+        TimelineView(.animation(minimumInterval: 0.08, paused: !animated)) { tl in
             Canvas { ctx, size in
-                let t = tl.date.timeIntervalSinceReferenceDate
+                let t = animated ? tl.date.timeIntervalSinceReferenceDate : 1_000
                 let cols = Int(size.width / 16)
                 for c in 0..<max(cols, 1) {
                     let speed = 40.0 + Double((c * 37) % 60)
