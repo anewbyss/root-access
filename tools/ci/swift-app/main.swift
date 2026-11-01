@@ -42,6 +42,22 @@ let wsRound = try JSONDecoder().decode(SaveData.self, from: try GameStore.encode
 precondition(wsRound == ws, "prefs round trip")
 print("prefs: ok")
 
+// Pet: every part draws at every stage, new fields and persona overrides round-trip, persona exports.
+var pet = PetState()
+for st in 0..<d.petStages.count { for p in PetState.parts { for part in d.petParts[p.key] ?? [] {
+    pet[keyPath: p.path] = part.id
+    precondition(!Engine.shared.petArt(pet, stage: st).isEmpty, "pet art \(p.key)=\(part.id) stage \(st)")
+} ; pet[keyPath: p.path] = PetState()[keyPath: p.path] } }
+let petWeb = #"{"format":"rootaccess-save","version":2,"faction":"lantern","xp":6000,"done":["py1"],"pet":{"name":"BIT","shape":"orb","mouth":"grin","accessory":"lantern","persona":{"seed":2,"traits":{"humor":90},"archetype":"Night Archivist"}}}"#
+let ps = try JSONDecoder().decode(SaveData.self, from: Data(petWeb.utf8))
+precondition(ps.pet.shape == "orb" && ps.pet.mouth == "grin" && ps.pet.trim == "match", "pet fields")
+let psRound = try JSONDecoder().decode(SaveData.self, from: try GameStore.encode(ps))
+precondition(psRound == ps, "pet round trip")
+let persona = Engine.shared.persona(ps)
+precondition(persona?.archetype == "Night Archivist" && persona?.traits["humor"] == 90 && persona?.prompt.system.contains("BIT") == true, "persona")
+precondition(Engine.shared.personaJSON(ps).contains("\"format\": \"rootaccess-persona\"") && Engine.shared.personaCard(ps).hasPrefix("# BIT"), "persona export")
+print("pet + persona: ok (\(d.petParts.values.map(\.count).reduce(0, +)) parts, \(d.petStages.count) stages)")
+
 // On-device JavaScript (JavaScriptCore + virtual timers): solutions pass, starters fail, runaway loops stop.
 let semLocal = DispatchSemaphore(value: 0)
 Task.detached {

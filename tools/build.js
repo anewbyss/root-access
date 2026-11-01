@@ -4,7 +4,7 @@
 const fs = require("fs"), path = require("path"), crypto = require("crypto");
 const ROOT = path.join(__dirname, "..");
 const SRC = path.join(ROOT, "curriculum"), WEB = path.join(ROOT, "web"), OUT = path.join(WEB, "curriculum");
-const ORDER = ["_core", "_world", "_dossiers", "_engine", "_local", "basics", "python", "javascript", "typescript", "sql", "bash", "go", "rust", "swift", "kotlin", "java", "csharp", "cpp", "_steps", "_guide"];
+const ORDER = ["_core", "_world", "_pet", "_dossiers", "_engine", "_local", "basics", "python", "javascript", "typescript", "sql", "bash", "go", "rust", "swift", "kotlin", "java", "csharp", "cpp", "_steps", "_guide"];
 
 fs.rmSync(OUT, { recursive: true, force: true });
 fs.mkdirSync(OUT, { recursive: true });

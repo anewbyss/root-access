@@ -36,7 +36,10 @@ struct Dossier: Decodable {
 }
 struct Intel: Decodable, Hashable { let year: Int; let name, note: String }
 struct PetStage: Decodable { let lvl: Int; let name, desc: String }
-struct PetPart: Decodable { let id, label: String; let lvl: Int; let hex: String? }
+struct PetPart: Decodable {
+    let id, label: String; let lvl: Int; let hex: String?
+    let fluent: Int?; let faction: String?   // extra unlock rules, same as RA.petLock in curriculum/_pet.js
+}
 struct PraxisStage: Decodable { let id, name, what: String }
 struct Evidence: Decodable { let claim: String; let source: SourceRef }
 struct Praxis: Decodable { let stages: [PraxisStage]; let selfExplain: [String]; let fadeAfter: Int; let evidence: [Evidence] }
@@ -110,19 +113,29 @@ enum JSONValue: Codable, Equatable {
 }
 
 struct PetState: Codable, Equatable {
-    var name = "NULL", color = "matrix", eyes = "dot", crown = "none", aura = "none"
+    var name = "NULL", color = "matrix", trim = "match", shape = "auto", eyes = "dot", mouth = "none", markings = "none"
+    var crown = "none", accessory = "none", aura = "none"
     var energy = 70, bond = 10
+    /// Personality overrides (seed, traits, archetype, greeting, pronouns). Kept as raw JSON so web edits round-trip.
+    var persona: [String: JSONValue] = [:]
+    /// Part categories in display order, with their headings.
+    static let parts: [(key: String, title: String, path: WritableKeyPath<PetState, String>)] = [
+        ("color", "Core colour", \.color), ("trim", "Trim colour", \.trim), ("shape", "Body", \.shape), ("eyes", "Optics", \.eyes),
+        ("mouth", "Mouth", \.mouth), ("markings", "Markings", \.markings), ("crown", "Crown", \.crown),
+        ("accessory", "Accessory", \.accessory), ("aura", "Aura", \.aura)
+    ]
     init() {}
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self); let z = PetState()
-        name = try c.decodeIfPresent(String.self, forKey: .name) ?? z.name
-        color = try c.decodeIfPresent(String.self, forKey: .color) ?? z.color
-        eyes = try c.decodeIfPresent(String.self, forKey: .eyes) ?? z.eyes
-        crown = try c.decodeIfPresent(String.self, forKey: .crown) ?? z.crown
-        aura = try c.decodeIfPresent(String.self, forKey: .aura) ?? z.aura
+        func str(_ k: CodingKeys, _ def: String) -> String { ((try? c.decodeIfPresent(String.self, forKey: k)) ?? nil) ?? def }
+        name = str(.name, z.name); color = str(.color, z.color); trim = str(.trim, z.trim); shape = str(.shape, z.shape)
+        eyes = str(.eyes, z.eyes); mouth = str(.mouth, z.mouth); markings = str(.markings, z.markings)
+        crown = str(.crown, z.crown); accessory = str(.accessory, z.accessory); aura = str(.aura, z.aura)
         energy = (try? c.decodeIfPresent(Int.self, forKey: .energy)) ?? z.energy
         bond = (try? c.decodeIfPresent(Int.self, forKey: .bond)) ?? z.bond
+        persona = (try? c.decodeIfPresent([String: JSONValue].self, forKey: .persona)) ?? [:]
     }
+    enum CodingKeys: String, CodingKey { case name, color, trim, shape, eyes, mouth, markings, crown, accessory, aura, energy, bond, persona }
 }
 
 struct EngineSettings: Codable, Equatable {
@@ -336,6 +349,32 @@ struct SourceFile: FileDocument {
         return faction?.color ?? "#3dff7a"
     }
     var stageIndex: Int { CUR.petStages.lastIndex { level >= $0.lvl } ?? 0 }
+    var fluentCount: Int { CUR.languages.filter { fluency($0.id) == 12 }.count }
+    /// nil when unlocked, otherwise why it's locked. Same rules as RA.petLock.
+    func lockReason(_ p: PetPart) -> String? {
+        if let f = p.faction, f != s.faction { return "\(CUR.factions.first { $0.id == f }?.short ?? f) only" }
+        if let n = p.fluent, fluentCount < n { return "\(n) fluent languages" }
+        if level < p.lvl { return "LVL \(p.lvl)" }
+        return nil
+    }
+    // Personality overrides in s.pet.persona (same shape as the web app's).
+    var personaSeed: Int { if case .number(let n)? = s.pet.persona["seed"] { return Int(n) }; return 0 }
+    func traitOverride(_ id: String) -> Int? {
+        if case .object(let t)? = s.pet.persona["traits"], case .number(let n)? = t[id] { return Int(n) }
+        return nil
+    }
+    func setTrait(_ id: String, _ value: Int?) {
+        var t: [String: JSONValue] = [:]
+        if case .object(let o)? = s.pet.persona["traits"] { t = o }
+        if let v = value { t[id] = .number(Double(v)) } else { t.removeValue(forKey: id) }
+        s.pet.persona["traits"] = .object(t)
+    }
+    func setPersonaText(_ key: String, _ value: String) {
+        let v = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        if v.isEmpty { s.pet.persona.removeValue(forKey: key) } else { s.pet.persona[key] = .string(v) }
+    }
+    func personaText(_ key: String) -> String { if case .string(let v)? = s.pet.persona[key] { return v }; return "" }
+    func rerollPersona() { s.pet.persona["seed"] = .number(Double(personaSeed + 1)) }
 
     func missions(_ lang: String) -> [Mission] { CUR.missions.filter { $0.lang == lang }.sorted { $0.rank < $1.rank } }
     func isDone(_ m: Mission) -> Bool { s.done.contains(m.id) }

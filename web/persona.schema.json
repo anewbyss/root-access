@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://anewbyss.github.io/root-access/persona.schema.json",
+  "title": "ROOT//ACCESS persona",
+  "description": "A portable assistant personality generated from a ROOT//ACCESS code pet. Version 1. Readers must ignore fields they don't know; writers may add fields under `extensions` (namespaced, e.g. \"x-myassistant\") without bumping the version. See docs/PERSONA.md.",
+  "type": "object",
+  "required": ["format", "version", "name", "archetype", "traits", "voice", "prompt"],
+  "properties": {
+    "format": { "const": "rootaccess-persona" },
+    "version": { "type": "integer", "minimum": 1, "description": "Major version. Breaking changes only; additive fields stay at 1." },
+    "$schema": { "type": "string" },
+    "id": { "type": "string", "description": "Stable-ish identifier for this personality export." },
+    "name": { "type": "string", "maxLength": 64 },
+    "pronouns": { "type": "string", "default": "it/its" },
+    "archetype": { "type": "string", "description": "Short role, e.g. \"Meticulous Warden\"." },
+    "summary": { "type": "string" },
+    "created": { "type": "string", "format": "date-time" },
+    "source": {
+      "type": "object",
+      "description": "Where it came from. Informational.",
+      "properties": {
+        "app": { "type": "string" }, "saveVersion": { "type": "integer" }, "faction": { "type": ["string", "null"] },
+        "level": { "type": "integer" }, "xp": { "type": "integer" }, "stage": { "type": "string" }, "seed": { "type": "integer" }
+      }
+    },
+    "traits": {
+      "type": "object",
+      "description": "Trait scores from 0 to 100. Known ids: warmth, energy, curiosity, rigor, humor, boldness, formality, independence. Unknown ids must be tolerated.",
+      "additionalProperties": { "type": "number", "minimum": 0, "maximum": 100 }
+    },
+    "traitScale": {
+      "type": "object",
+      "properties": {
+        "min": { "type": "number" }, "max": { "type": "number" },
+        "labels": { "type": "array", "items": { "type": "object", "required": ["id", "label"], "properties": { "id": { "type": "string" }, "label": { "type": "string" }, "low": { "type": "string" }, "high": { "type": "string" } } } }
+      }
+    },
+    "voice": {
+      "type": "object",
+      "required": ["tone"],
+      "properties": {
+        "tone": { "type": "array", "items": { "type": "string" } },
+        "greeting": { "type": "string" }, "signoff": { "type": "string" },
+        "catchphrases": { "type": "array", "items": { "type": "string" } },
+        "quirks": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "knowledge": {
+      "type": "object",
+      "properties": {
+        "languages": { "type": "array", "items": { "type": "object", "properties": { "id": { "type": "string" }, "name": { "type": "string" }, "ranks": { "type": "integer" }, "of": { "type": "integer" }, "fluent": { "type": "boolean" } } } },
+        "fluent": { "type": "array", "items": { "type": "string" } },
+        "level": { "type": "integer" }, "missionsCleared": { "type": "integer" }
+      }
+    },
+    "appearance": {
+      "type": "object",
+      "properties": {
+        "description": { "type": "string" },
+        "parts": { "type": "object", "additionalProperties": { "type": "string" } },
+        "stage": { "type": "string" },
+        "avatarSvg": { "type": "string", "description": "Self-contained 200x200 SVG, no scripts or external references." }
+      }
+    },
+    "principles": { "type": "array", "items": { "type": "string" }, "description": "Behavioural ground rules. Assistants should keep these even when extending the persona." },
+    "prompt": {
+      "type": "object",
+      "required": ["system"],
+      "properties": { "system": { "type": "string", "description": "Ready-to-use system prompt for a language model." } }
+    },
+    "capabilities": {
+      "type": "array",
+      "description": "Open-ended: abilities a host assistant may enable (voice, vision, reminders...). Empty when exported from the game.",
+      "items": { "type": "object", "required": ["id"], "properties": { "id": { "type": "string" }, "enabled": { "type": "boolean" }, "settings": { "type": "object" } } }
+    },
+    "connectors": {
+      "type": "array",
+      "description": "Open-ended: integrations a host assistant may attach (MCP servers, home automation, calendars...). Empty when exported. Hosts must ask the user before connecting anything.",
+      "items": { "type": "object", "required": ["id", "kind"], "properties": { "id": { "type": "string" }, "kind": { "type": "string", "examples": ["mcp", "http", "local"] }, "endpoint": { "type": "string" }, "scopes": { "type": "array", "items": { "type": "string" } }, "settings": { "type": "object" } } }
+    },
+    "memory": { "type": "object", "description": "Open-ended long-term memory a host can persist.", "properties": { "notes": { "type": "array" } } },
+    "extensions": {
+      "type": "object",
+      "description": "Namespaced data for specific hosts. Keys should start with \"x-\".",
+      "propertyNames": { "pattern": "^x-" }
+    }
+  }
+}

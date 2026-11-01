@@ -57,7 +57,7 @@
       });
       var factions = Object.keys(RA.FACTIONS).map(function (k) { var f = RA.FACTIONS[k]; return { id: k, name: f.name, short: f.short, color: f.color, handler: f.handler, creed: f.creed, pitch: f.pitch, lore: f.lore }; });
       var parts = {};
-      Object.keys(RA.PET_PARTS).forEach(function (k) { parts[k] = RA.PET_PARTS[k].map(function (p) { return { id: p.id, label: p.label, lvl: p.lvl, hex: p.val || null }; }); });
+      Object.keys(RA.PET_PARTS).forEach(function (k) { parts[k] = RA.PET_PARTS[k].map(function (p) { return { id: p.id, label: p.label, lvl: p.lvl, hex: p.val || null, fluent: p.fluent || null, faction: p.faction || null }; }); });
       return JSON.stringify({
         missions: RA.missions.map(function (m) {
           var mt = meta(m);
@@ -91,6 +91,10 @@
     explain: function (id, resultJSON) { return strip(RA.explain(BY[id], JSON.parse(resultJSON))); },
     joinPieces: function (partsJSON) { return RA.joinPieces(JSON.parse(partsJSON)); },
     request: function (id, code, cfg) { return JSON.stringify(RA.judge0Request(BY[id], code, JSON.parse(cfg || "{}"))); },
+    // Pet (see curriculum/_pet.js): display list for Canvas, and the personality export.
+    petArt: function (petJSON, stage) { return JSON.stringify(RA.petArt(JSON.parse(petJSON || "{}"), Number(stage))); },
+    persona: function (saveJSON) { return JSON.stringify(RA.persona(JSON.parse(saveJSON || "{}")), null, 2); },
+    personaCard: function (saveJSON) { return RA.personaCard(RA.persona(JSON.parse(saveJSON || "{}"))); },
     // On-device runs (see curriculum/_local.js): compose, then report in the same shape as finish().
     localPlan: function (id, code) { var p = RA.localPlan(BY[id], code); return JSON.stringify(p ? { kind: p.kind, src: p.src } : { kind: "none", src: "" }); },
     jsShim: function () { return RA.JS_SHIM; },
